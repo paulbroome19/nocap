@@ -1,8 +1,119 @@
 """HTTP routes for workflows — thin: parse, call service, shape response.
 
-Empty scaffold: an `APIRouter` with no routes yet, wired in `app.main`.
+The demo surface: list suites, create/execute runs, attach inputs, inspect a
+run, download outputs, and browse run history.
 """
 
-from fastapi import APIRouter
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+from app.core.db import get_db
+from app.facts.schemas import (
+    FactIngestSummary,
+    IndicatorsParamsIngestSummary,
+    RunFileOut,
+)
+from app.workflows import service
+from app.workflows.schemas import (
+    RunCreate,
+    RunDetailOut,
+    RunOut,
+    WorkflowConfigOut,
+)
 
 router = APIRouter()
+
+
+@router.get("/configs", response_model=list[WorkflowConfigOut])
+def list_workflows(db: Session = Depends(get_db)) -> list[WorkflowConfigOut]:
+    return [
+        WorkflowConfigOut.model_validate(w) for w in service.list_workflows(db)
+    ]
+
+
+@router.get("/configs/{workflow_id}/runs", response_model=list[RunOut])
+def run_history(
+    workflow_id: int, db: Session = Depends(get_db)
+) -> list[RunOut]:
+    service.get_workflow(db, workflow_id)  # 404 if unknown
+    return [RunOut.model_validate(r) for r in service.list_runs(db, workflow_id)]
+
+
+@router.post("/runs", response_model=RunOut, status_code=201)
+def create_run(body: RunCreate, db: Session = Depends(get_db)) -> RunOut:
+    run = service.create_run(
+        db,
+        workflow_id=body.workflow_id,
+        snapshot_id=body.snapshot_id,
+        reference_date=body.reference_date,
+        entity_lei=body.entity_lei,
+        entity_scope=body.entity_scope,
+        release_id=body.release_id,
+        country=body.country,
+    )
+    return RunOut.model_validate(run)
+
+
+@router.get("/runs/{run_id}", response_model=RunDetailOut)
+def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
+    run = service.get_run(db, run_id)
+    files = service.run_files(db, run_id)
+    return RunDetailOut(
+        run=RunOut.model_validate(run),
+        files=[RunFileOut.model_validate(f) for f in files],
+    )
+
+
+@router.post(
+    "/runs/{run_id}/fact-file",
+    response_model=FactIngestSummary,
+    status_code=201,
+)
+async def attach_fact_file(
+    run_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> FactIngestSummary:
+    data = await file.read()
+    return service.attach_fact_file(
+        db, run_id=run_id, filename=file.filename or "facts.xlsx", data=data
+    )
+
+
+@router.post(
+    "/runs/{run_id}/indicators-params-file",
+    response_model=IndicatorsParamsIngestSummary,
+    status_code=201,
+)
+async def attach_indicators_params_file(
+    run_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> IndicatorsParamsIngestSummary:
+    data = await file.read()
+    return service.attach_indicators_params_file(
+        db,
+        run_id=run_id,
+        filename=file.filename or "indicators_params.xlsx",
+        data=data,
+    )
+
+
+@router.post("/runs/{run_id}/execute", response_model=RunOut)
+def execute_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
+    return RunOut.model_validate(service.execute_run(db, run_id))
+
+
+@router.get("/run-files/{run_file_id}/download")
+def download_run_file(
+    run_file_id: int, db: Session = Depends(get_db)
+) -> FileResponse:
+    run_file = service.get_run_file(db, run_file_id)
+    path = service.read_run_file_path(get_settings(), run_file)
+    return FileResponse(
+        path, filename=run_file.filename, media_type="application/octet-stream"
+    )

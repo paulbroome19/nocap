@@ -33,6 +33,7 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env            # adjust DATABASE_URL if needed
 alembic upgrade head            # wires Alembic against Postgres
+python -m app.workflows.seed    # seed the reporting-suite workflow configs
 uvicorn app.main:app --reload   # http://127.0.0.1:8000
 # verify: curl http://127.0.0.1:8000/health  -> {"status":"ok",...}
 pytest                          # run the test suite
@@ -46,8 +47,14 @@ npm install
 npm run dev                     # http://localhost:5173
 ```
 
-Once both are running, open the **Snapshots** page and upload a DPM `.accdb`
-release; it ingests in the background and shows `ingesting → ready`.
+Once both are running:
+
+1. **Snapshots** — upload a DPM `.accdb` release; it ingests in the background
+   (`ingesting → ready`).
+2. **Workflows** — pick a suite (e.g. COREP LCR), start a **New Run** (choose the
+   ready snapshot, reference date, entity; upload the fact XLSX and the
+   indicators/parameters XLSX from [`demo/`](./demo)), press **Run**.
+3. **Run detail** — download the generated xBRL-CSV package zip.
 
 ## Documentation
 

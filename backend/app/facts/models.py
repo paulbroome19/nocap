@@ -19,7 +19,7 @@ from __future__ import annotations
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, Integer, String, Text, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -38,7 +38,9 @@ class RunFile(Base):
     __tablename__ = "run_file"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    run_id: Mapped[int] = mapped_column(Integer, index=True)
+    run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("run.id"), index=True
+    )
     role: Mapped[RunFileRole] = mapped_column(
         Enum(RunFileRole, name="run_file_role")
     )
@@ -62,7 +64,9 @@ class Fact(Base):
     __tablename__ = "fact"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    run_id: Mapped[int] = mapped_column(Integer, index=True)
+    run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("run.id"), index=True
+    )
 
     template_code: Mapped[str] = mapped_column(String(64))
     row_code: Mapped[str] = mapped_column(String(16))
