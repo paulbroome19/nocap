@@ -35,6 +35,11 @@ class ValidationError(AppError):
     code = "validation_error"
 
 
+class ConflictError(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "conflict"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Wire ``AppError`` translation into the FastAPI app."""
 

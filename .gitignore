@@ -25,6 +25,13 @@ frontend/dist/
 frontend/.vite/
 *.local
 
+# Snapshot / uploaded-file storage (local dev DATA_DIR)
+/data/
+backend/data/
+
+# Test-generated fixture databases
+backend/tests/fixtures/*.sqlite
+
 # Environment / secrets (twelve-factor: config via env only, never in repo)
 .env
 .env.*
