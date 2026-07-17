@@ -31,7 +31,11 @@ from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
-from app.taxonomy.schemas import DatapointResolution, TemplateInfo
+from app.taxonomy.schemas import (
+    DatapointResolution,
+    ModuleMetadata,
+    TemplateInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +377,15 @@ WHERE mv.Code = :module
 ORDER BY tv.Code
 """
 
+_MODULE_META_SQL = f"""
+SELECT mv.Code, f.Code, mv.VersionNumber, mv.Name
+FROM ModuleVersion mv
+JOIN Module m ON m.ModuleID = mv.ModuleID
+JOIN Framework f ON f.FrameworkID = m.FrameworkID
+WHERE mv.Code = :module AND {_RELEASE_VALID.format(a="mv")}
+LIMIT 1
+"""
+
 
 class TaxonomyLookup:
     """Read-only queries against one snapshot's converted DPM SQLite file.
@@ -454,6 +467,30 @@ class TaxonomyLookup:
             _LIST_TEMPLATES_SQL, {"module": module_code, "rid": rid}
         ).fetchall()
         return [TemplateInfo(code=r[0], name=r[1]) for r in rows]
+
+    def module_metadata(
+        self, module_code: str, *, release_id: int | None = None
+    ) -> ModuleMetadata | None:
+        """Framework + version identity of a module, for package generation."""
+        rid = release_id if release_id is not None else self.default_release_id()
+        row = self._conn.execute(
+            _MODULE_META_SQL, {"module": module_code, "rid": rid}
+        ).fetchone()
+        if row is None:
+            return None
+        return ModuleMetadata(
+            module_code=row[0],
+            framework_code=row[1],
+            module_version=row[2],
+            name=row[3],
+        )
+
+    def release_code(self, release_id: int) -> str | None:
+        """The release's code (e.g. "4.2") — used as the taxonomy version."""
+        row = self._conn.execute(
+            "SELECT Code FROM Release WHERE ReleaseID = ?", (release_id,)
+        ).fetchone()
+        return None if row is None else str(row[0])
 
 
 def open_lookup(

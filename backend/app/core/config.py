@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
 
+    # ISO 2-letter reporting country used in generated package filenames (the
+    # reporting country isn't captured per-entity in v1). Overridable per run.
+    default_country: str = "XX"
+
     # SQLAlchemy 2.x + psycopg (v3) driver against local Postgres by default.
     database_url: str = (
         "postgresql+psycopg://postgres:postgres@localhost:5432/nocap"

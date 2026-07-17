@@ -35,6 +35,15 @@ class TemplateInfo(BaseModel):
     name: str
 
 
+class ModuleMetadata(BaseModel):
+    """Identity of a module within a snapshot, for package generation."""
+
+    module_code: str
+    framework_code: str
+    module_version: str  # e.g. "3.3.0"
+    name: str
+
+
 class DatapointResolution(BaseModel):
     """Result of resolving a (template, row, column) triple to a datapoint.
 
