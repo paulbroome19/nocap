@@ -1,0 +1,46 @@
+"""Application error types and FastAPI exception handlers.
+
+Stage services raise these plain-Python errors; they do not know HTTP exists.
+The handlers here translate them into responses at the edge.
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+
+
+class AppError(Exception):
+    """Base class for expected, domain-level failures.
+
+    ``status_code`` lets a service signal intent (not found, invalid input)
+    without importing FastAPI.
+    """
+
+    status_code: int = status.HTTP_400_BAD_REQUEST
+    code: str = "app_error"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class NotFoundError(AppError):
+    status_code = status.HTTP_404_NOT_FOUND
+    code = "not_found"
+
+
+class ValidationError(AppError):
+    status_code = 422  # Unprocessable Content
+    code = "validation_error"
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """Wire ``AppError`` translation into the FastAPI app."""
+
+    @app.exception_handler(AppError)
+    async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"code": exc.code, "message": exc.message}},
+        )

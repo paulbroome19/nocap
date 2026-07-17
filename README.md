@@ -13,14 +13,36 @@ external vendor for the EBA filing workflow (v1 target: COREP LCR, end to end).
 
 ## Local development
 
-> Placeholder — filled in once the scaffold lands.
+Prerequisites: Python 3.12, Node 20+, and a local Postgres (a Docker container
+is fine).
+
+**Postgres** — any local instance works; the backend defaults to
+`postgresql+psycopg://postgres:postgres@localhost:5432/nocap`. With Docker:
 
 ```bash
-# Backend
-cd backend && ...
+docker run -d --name nocap-pg -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=nocap -p 5432:5432 postgres:16
+```
 
-# Frontend
-cd frontend && ...
+**Backend** (FastAPI, from `backend/`):
+
+```bash
+cd backend
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env            # adjust DATABASE_URL if needed
+alembic upgrade head            # wires Alembic against Postgres
+uvicorn app.main:app --reload   # http://127.0.0.1:8000
+# verify: curl http://127.0.0.1:8000/health  -> {"status":"ok",...}
+pytest                          # run the test suite
+```
+
+**Frontend** (React + Vite, from `frontend/`):
+
+```bash
+cd frontend
+npm install
+npm run dev                     # http://localhost:5173
 ```
 
 ## Documentation
