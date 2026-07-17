@@ -1,0 +1,37 @@
+# Large EBA taxonomy / DPM reference files live here, untracked.
+# Keep the directory itself (via .gitkeep) but ignore everything in it.
+docs/reference/*
+!docs/reference/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# Environment / secrets (twelve-factor: config via env only, never in repo)
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
