@@ -12,9 +12,11 @@ from app.comparison.router import router as comparison_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
+from app.facts.router import get_template_normalizer
 from app.facts.router import router as facts_router
 from app.generation.router import router as generation_router
 from app.taxonomy.router import router as taxonomy_router
+from app.taxonomy.service import normalize_template_code
 from app.validation.router import router as validation_router
 from app.workflows.router import router as workflows_router
 
@@ -26,6 +28,13 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=settings.app_name, version="0.1.0")
     register_exception_handlers(app)
+
+    # Composition root: wire the taxonomy contract's template-code normaliser
+    # (canonical DB form) into the facts stage. Stages never import each other;
+    # this cross-stage dependency lives here in the app assembly.
+    app.dependency_overrides[get_template_normalizer] = lambda: (
+        lambda code: normalize_template_code(code, form="db")
+    )
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:

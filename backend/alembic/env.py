@@ -17,6 +17,7 @@ from app.core.db import Base
 
 # Import model modules so their tables register on Base.metadata. Add each stage
 # here as it defines models.
+from app.facts import models as _facts_models  # noqa: E402,F401
 from app.taxonomy import models as _taxonomy_models  # noqa: E402,F401
 
 config = context.config
