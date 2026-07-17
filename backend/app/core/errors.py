@@ -20,9 +20,11 @@ class AppError(Exception):
     status_code: int = status.HTTP_400_BAD_REQUEST
     code: str = "app_error"
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, details: list | None = None) -> None:
         super().__init__(message)
         self.message = message
+        # Optional structured payload (e.g. per-row rejection messages).
+        self.details = details
 
 
 class NotFoundError(AppError):
@@ -40,12 +42,19 @@ class ConflictError(AppError):
     code = "conflict"
 
 
+class FileRejectedError(AppError):
+    """An uploaded file failed shape validation. ``details`` lists row errors."""
+
+    status_code = 422  # Unprocessable Content
+    code = "file_rejected"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Wire ``AppError`` translation into the FastAPI app."""
 
     @app.exception_handler(AppError)
     async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": {"code": exc.code, "message": exc.message}},
-        )
+        error: dict[str, object] = {"code": exc.code, "message": exc.message}
+        if exc.details is not None:
+            error["details"] = exc.details
+        return JSONResponse(status_code=exc.status_code, content={"error": error})
