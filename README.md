@@ -13,8 +13,9 @@ external vendor for the EBA filing workflow (v1 target: COREP LCR, end to end).
 
 ## Local development
 
-Prerequisites: Python 3.12, Node 20+, and a local Postgres (a Docker container
-is fine).
+Prerequisites: Python 3.12, Node 20+, a local Postgres (a Docker container is
+fine), and [`mdbtools`](https://github.com/mdbtools/mdbtools) (`brew install
+mdbtools`) — used to convert the EBA DPM Access release to SQLite on ingest.
 
 **Postgres** — any local instance works; the backend defaults to
 `postgresql+psycopg://postgres:postgres@localhost:5432/nocap`. With Docker:
@@ -45,6 +46,11 @@ npm install
 npm run dev                     # http://localhost:5173
 ```
 
+Once both are running, open the **Snapshots** page and upload a DPM `.accdb`
+release; it ingests in the background and shows `ingesting → ready`.
+
 ## Documentation
 
-The engineering brief and architecture live in [`CLAUDE.md`](./CLAUDE.md) — start there.
+- [`CLAUDE.md`](./CLAUDE.md) — the engineering brief and architecture. Start here.
+- [`docs/dpm-notes.md`](./docs/dpm-notes.md) — how the EBA DPM 2.0 database is
+  keyed and how a (template, row, column) triple resolves to a datapoint.

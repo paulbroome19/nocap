@@ -15,9 +15,9 @@ from alembic import context
 from app.core.config import get_settings
 from app.core.db import Base
 
-# Import model modules so their tables register on Base.metadata. They are empty
-# in the scaffold; add imports here as stages define models.
-# e.g. from app.taxonomy import models as taxonomy_models  # noqa: F401
+# Import model modules so their tables register on Base.metadata. Add each stage
+# here as it defines models.
+from app.taxonomy import models as _taxonomy_models  # noqa: E402,F401
 
 config = context.config
 
