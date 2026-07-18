@@ -12,14 +12,28 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.taxonomy import artifacts, rules, service
+from app.taxonomy import artifacts, capabilities, rules, service
 from app.taxonomy.models import ReleaseSlot, TaxonomySnapshot
-from app.taxonomy.schemas import ReleaseDetailOut, ReleaseSlotOut, SnapshotOut
+from app.taxonomy.schemas import (
+    CapabilitySetOut,
+    ReleaseDetailOut,
+    ReleaseSlotOut,
+    SnapshotOut,
+)
 
 router = APIRouter()
 
 
+def _snapshot_out(db: Session, snapshot: TaxonomySnapshot) -> SnapshotOut:
+    """A snapshot with its derived capabilities attached."""
+    out = SnapshotOut.model_validate(snapshot)
+    caps = capabilities.derive_capabilities(artifacts.list_slots(db, snapshot))
+    out.capabilities = CapabilitySetOut(**caps.to_dict())
+    return out
+
+
 def _release_detail(db: Session, snapshot: TaxonomySnapshot) -> ReleaseDetailOut:
+    slot_views = artifacts.list_slots(db, snapshot)
     slots = [
         ReleaseSlotOut(
             slot=v.spec.slot,
@@ -33,12 +47,15 @@ def _release_detail(db: Session, snapshot: TaxonomySnapshot) -> ReleaseDetailOut
             error=v.error,
             uploaded_at=v.uploaded_at,
         )
-        for v in artifacts.list_slots(db, snapshot)
+        for v in slot_views
     ]
+    caps = capabilities.derive_capabilities(slot_views)
     return ReleaseDetailOut(
         release=SnapshotOut.model_validate(snapshot),
         ready=artifacts.release_ready(snapshot),
         slots=slots,
+        capabilities=CapabilitySetOut(**caps.to_dict()),
+        coherence_warnings=[],  # populated by the coherence check (next checkpoint)
     )
 
 
@@ -47,14 +64,14 @@ def list_snapshots(db: Session = Depends(get_db)) -> list[SnapshotOut]:
     # Reconcile status with what's on disk so the registry never shows "ready"
     # for a snapshot whose artifacts have gone missing.
     service.verify_all_snapshots(db)
-    return [SnapshotOut.model_validate(s) for s in service.list_snapshots(db)]
+    return [_snapshot_out(db, s) for s in service.list_snapshots(db)]
 
 
 @router.get("/snapshots/{snapshot_id}", response_model=SnapshotOut)
 def get_snapshot(snapshot_id: int, db: Session = Depends(get_db)) -> SnapshotOut:
     snapshot = service.get_snapshot(db, snapshot_id)
     service.verify_snapshot(db, snapshot)
-    return SnapshotOut.model_validate(snapshot)
+    return _snapshot_out(db, snapshot)
 
 
 @router.post("/snapshots/{snapshot_id}/reingest", response_model=SnapshotOut)

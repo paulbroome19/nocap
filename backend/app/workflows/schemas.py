@@ -126,6 +126,8 @@ class RunOut(BaseModel):
     status: RunStatus
     error: str | None
     failure_details: list | None
+    # The release capability set captured when the run was created.
+    capabilities: dict | None
     created_at: datetime
 
 

@@ -185,6 +185,10 @@ class Run(Base):
     # unsatisfied_rule_ids, deactivated, note}. Null until the phase runs.
     formula_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # The release capability set active when the run was created, captured for
+    # reproducibility (capabilities are otherwise derived on read, never stored).
+    capabilities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # Real in v2 when auth lands; nullable in v1.
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -41,6 +41,8 @@ from app.generation.schemas import (
     FilingIndicatorSpec,
     PackageMetadata,
 )
+from app.taxonomy import artifacts as taxonomy_artifacts
+from app.taxonomy import capabilities as taxonomy_caps
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
 from app.taxonomy.service import normalize_template_code, template_of
@@ -382,6 +384,12 @@ def create_run(
                 f"at release {rid}"
             )
 
+    # Capture the release's capability set at execution binding (reproducibility;
+    # capabilities are otherwise derived on read).
+    caps = taxonomy_caps.derive_capabilities(
+        taxonomy_artifacts.list_slots(db, snapshot, settings=settings)
+    )
+
     run = Run(
         workflow_id=wf.id,
         snapshot_id=snapshot.id,
@@ -397,6 +405,7 @@ def create_run(
         base_currency=currency,
         decimals=decimals if decimals is not None else -3,
         status=RunStatus.created,
+        capabilities=caps.to_dict(),
     )
     db.add(run)
     db.commit()
