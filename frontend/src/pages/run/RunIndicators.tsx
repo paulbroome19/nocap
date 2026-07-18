@@ -57,7 +57,11 @@ export default function RunIndicators() {
                     </span>
                   </td>
                   <td className="px-4 py-2 text-xs text-slate-500">
-                    {fi.source === 'declared' ? 'Declared' : 'Auto (from facts)'}
+                    {fi.source === 'auto'
+                      ? 'Optional (from facts)'
+                      : fi.reported
+                        ? 'Required (declared)'
+                        : 'Not required (declared)'}
                   </td>
                 </tr>
               ))}

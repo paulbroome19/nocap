@@ -29,7 +29,10 @@ describe('route table', () => {
     ['/releases/regulators/2/new', 'releases/regulators/:regulatorId/new'],
     ['/releases/1', 'releases/:snapshotId'],
     ['/reference', 'reference'],
+    ['/reference/entities', 'reference/entities'],
     ['/reference/entities/2', 'reference/entities/:entityId'],
+    ['/reference/filing-indicators', 'reference/filing-indicators'],
+    ['/reference/parameters', 'reference/parameters'],
     ['/settings', 'settings'],
     ['/settings/reporting', 'settings/reporting'],
     ['/settings/reporting/EBA', 'settings/reporting/:regulatorCode'],
@@ -55,7 +58,7 @@ describe('route table', () => {
   it.each([
     ['/nope'],
     ['/reporting/suites/4/extra'],
-    ['/reference/entities'],
+    ['/reference/nope'],
     ['/deeply/unknown/path'],
   ])('unknown route %s → styled catch-all', (url) => {
     expect(leaf(url)).toBe('*')

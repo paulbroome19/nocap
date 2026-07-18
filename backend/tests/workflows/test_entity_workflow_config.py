@@ -271,6 +271,43 @@ def test_config_get_update_roundtrip(client, db_session, entity, lcr_workflow) -
     assert body["decimals"] == -2
 
 
+def test_config_is_independent_per_entity_workflow_pair(
+    db_session: Session, entity: Entity, lcr_workflow: WorkflowConfig
+) -> None:
+    # A second entity, same workflow — the two configs must not clobber each other.
+    other = service.create_entity(
+        db_session,
+        name="Nordbank AG",
+        lei="529900NORDBANKAG7X31",
+        country="DE",
+        default_scope="IND",
+    )
+    service.upsert_entity_workflow_config(
+        db_session,
+        entity_id=entity.id,
+        workflow_id=lcr_workflow.id,
+        indicator_declarations={"C_67.00.a": "required"},
+        base_currency="USD",
+        decimals=-2,
+    )
+    service.upsert_entity_workflow_config(
+        db_session,
+        entity_id=other.id,
+        workflow_id=lcr_workflow.id,
+        indicator_declarations={"C_72.00.a": "not_required"},
+        base_currency=None,
+        decimals=None,
+    )
+
+    a = service.get_entity_workflow_config(db_session, entity.id, lcr_workflow.id)
+    b = service.get_entity_workflow_config(db_session, other.id, lcr_workflow.id)
+    # Declarations AND parameters coexist on one pair, and pairs are independent.
+    assert a.indicator_declarations == {"C_67.00": "required"}
+    assert (a.base_currency, a.decimals) == ("USD", -2)
+    assert b.indicator_declarations == {"C_72.00": "not_required"}
+    assert b.base_currency is None
+
+
 def test_entity_create_and_edit(client) -> None:
     created = client.post(
         "/api/workflows/entities",
