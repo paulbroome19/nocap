@@ -30,6 +30,7 @@ from app.workflows.schemas import (
     RunOut,
     RunSummaryOut,
     SuiteSummaryOut,
+    VerdictOut,
     WorkflowConfigOut,
     WorkflowSettingsUpdate,
 )
@@ -237,7 +238,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         RegisterRowOut(
             id=r.id, rule=r.rule, source=r.source, template=r.template,
             data_evaluated=r.data_evaluated, result=r.result, detail=r.detail,
-            rule_text=r.rule_text,
+            rule_text=r.rule_text, description=r.description, severity=r.severity,
+            blocking=r.blocking, evaluations=r.evaluations,
         )
         for r in service.build_run_register(db, run, findings)
     ]
@@ -249,6 +251,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         filing_indicators=run.filing_indicators,
         rule_register=register,
         formula_summary=run.formula_summary,
+        verdict=VerdictOut(**service.run_verdict(run, findings, run.formula_summary)),
     )
 
 

@@ -94,6 +94,14 @@ export interface FilingIndicatorOutcome {
   source: 'declared' | 'auto'
 }
 
+export interface RuleEvaluation {
+  message: string
+  values: string | null
+  template_code?: string | null
+  row_code?: string | null
+  column_code?: string | null
+}
+
 export interface RegisterRow {
   id: string
   rule: string
@@ -104,6 +112,26 @@ export interface RegisterRow {
   detail: string
   // The human rule statement (workbook Description); formula rows only.
   rule_text?: string | null
+  // Plain-English provenance (structural checks): what was checked and why.
+  description?: string | null
+  // Display severity: 'error' | 'warning' | 'info' | null (unknown).
+  severity?: string | null
+  // A FAILED row that blocks submission (error severity).
+  blocking?: boolean
+  // Per-evaluation detail for formula rows (individual failing contexts).
+  evaluations?: RuleEvaluation[] | null
+}
+
+export interface Verdict {
+  label: string // Submittable | Not submittable | Validating | Run failed
+  submittable: boolean | null // null while validation is still in progress
+  blocking: number
+  non_blocking_failures: number
+  warnings: number
+  unknown_severity: number
+  severity_known: boolean
+  reasoning: string
+  status: string
 }
 
 export interface FormulaSummary {
@@ -165,6 +193,7 @@ export interface RunDetail {
   filing_indicators: FilingIndicatorOutcome[] | null
   rule_register: RegisterRow[]
   formula_summary: FormulaSummary | null
+  verdict: Verdict
 }
 
 async function parseError(res: Response): Promise<string> {

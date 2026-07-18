@@ -150,6 +150,10 @@ class RegisterRowOut(BaseModel):
     result: str  # PASSED | FAILED | WARNING | NOTE | DEACTIVATED
     detail: str
     rule_text: str | None = None
+    description: str | None = None  # plain-English provenance (structural)
+    severity: str | None = None  # error | warning | info | None (unknown)
+    blocking: bool = False
+    evaluations: list | None = None  # per-evaluation detail (formula)
 
 
 class FactRowOut(BaseModel):
@@ -165,6 +169,20 @@ class FactRowOut(BaseModel):
     source_row: int | None
 
 
+class VerdictOut(BaseModel):
+    """The submission verdict + the reasoning shown in the status banner."""
+
+    label: str  # Submittable | Not submittable | Validating | Run failed
+    submittable: bool | None  # None while validation is still in progress
+    blocking: int
+    non_blocking_failures: int
+    warnings: int
+    unknown_severity: int
+    severity_known: bool
+    reasoning: str  # e.g. "0 blocking errors · 6 non-blocking rule failures"
+    status: str
+
+
 class RunDetailOut(BaseModel):
     """Run detail: the run, its files, findings, and traceability data."""
 
@@ -175,3 +193,4 @@ class RunDetailOut(BaseModel):
     filing_indicators: list[FilingIndicatorOutcome] | None
     rule_register: list[RegisterRowOut]
     formula_summary: dict | None
+    verdict: VerdictOut

@@ -753,6 +753,71 @@ def _finalise_status(db: Session, run: Run) -> None:
     db.commit()
 
 
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def run_verdict(run: Run, findings: list, formula_summary: dict | None) -> dict:
+    """The submission verdict + the reasoning behind it, for the status banner.
+
+    Blocking vs non-blocking derives from finding severity (structural error, or
+    a formula rule the workbook marks ``error``); non-blocking rule failures are
+    formula-phase warnings; warnings are the remaining warning-severity findings.
+    A run is submittable iff there are zero blocking errors. Where a failing
+    formula rule's severity is unknown (no workbook), it is counted honestly and
+    the verdict says so rather than implying it is safe.
+    """
+    blocking = non_blocking_failures = warnings = 0
+    for f in findings:
+        phase = getattr(f.phase, "value", f.phase)
+        if f.severity is Severity.error:
+            blocking += 1
+        elif f.severity is Severity.warning:
+            if phase == "formula":
+                non_blocking_failures += 1
+            else:
+                warnings += 1
+
+    unknown_severity = 0
+    if formula_summary and formula_summary.get("status") == "executed":
+        unknown_severity = sum(
+            1
+            for r in formula_summary.get("rules", [])
+            if r.get("result") == "FAILED" and not r.get("severity")
+        )
+
+    in_progress = run.status in (
+        RunStatus.running, RunStatus.formula_validation_running
+    )
+    if in_progress:
+        label, submittable = "Validating", None
+    elif run.status is RunStatus.failed:
+        label, submittable = "Run failed", False
+    else:
+        submittable = blocking == 0
+        label = "Submittable" if submittable else "Not submittable"
+
+    parts = [_plural(blocking, "blocking error")]
+    parts.append(_plural(non_blocking_failures, "non-blocking rule failure"))
+    if warnings:
+        parts.append(_plural(warnings, "warning"))
+    if unknown_severity:
+        parts.append(f"{unknown_severity} of unknown severity")
+    reasoning = " · ".join(parts)
+
+    return {
+        "label": label,
+        "submittable": submittable,
+        "blocking": blocking,
+        "non_blocking_failures": non_blocking_failures,
+        "warnings": warnings,
+        "unknown_severity": unknown_severity,
+        "severity_known": unknown_severity == 0,
+        "reasoning": reasoning,
+        "status": run.status.value,
+    }
+
+
 def execute_run(
     db: Session, run_id: int, *, settings: Settings | None = None
 ) -> Run:
@@ -971,13 +1036,17 @@ def execute_run(
     return run
 
 
-def _build_formula_summary(run: FormulaRun) -> dict:
+def _build_formula_summary(
+    run: FormulaRun, severities: dict[str, str] | None = None
+) -> dict:
     """Summarise a formula-validation run for the register + report.
 
-    Carries the per-rule results the adapter captured (satisfied + not-satisfied,
-    for the evaluated rules), the loaded/evaluated counts, and the EBA
-    deactivated-rules note.
+    Carries the per-rule results the adapter captured — per-evaluation detail
+    (cell refs + compared values), the satisfied/not-satisfied counts, the EBA
+    severity (blocking vs non-blocking, from the workbook), and the loaded/
+    evaluated counts + deactivated-rules note.
     """
+    severities = severities or {}
     if not run.available:
         return {
             "status": "unavailable",
@@ -998,6 +1067,11 @@ def _build_formula_summary(run: FormulaRun) -> dict:
             "result": r.result,
             "values": r.values,
             "message": r.message,
+            # EBA severity (from the workbook) → blocking iff "error". None when
+            # unknown (no workbook / rule absent), surfaced honestly downstream.
+            "severity": severities.get(r.rule_id),
+            "blocking": severities.get(r.rule_id) == "error",
+            "evaluations": r.evaluations,
         }
         for r in run.rule_results
     ]
@@ -1013,6 +1087,24 @@ def _build_formula_summary(run: FormulaRun) -> dict:
         "deactivated": run.deactivated,
         "note": None,
     }
+
+
+def _apply_workbook_severity(
+    finding: Finding, severities: dict[str, str]
+) -> Finding:
+    """Re-key a formula finding's severity to the EBA workbook severity.
+
+    A failing rule the workbook marks ``error`` becomes a blocking (error)
+    finding — so it flows through ``_finalise_status`` and the verdict as
+    blocking — while ``warning`` rules stay non-blocking. Unknown severity keeps
+    whatever Arelle logged.
+    """
+    sev = severities.get(finding.code)
+    if sev == "error":
+        return finding.model_copy(update={"severity": Severity.error})
+    if sev == "warning":
+        return finding.model_copy(update={"severity": Severity.warning})
+    return finding
 
 
 def run_formula_validation_task(run_id: int) -> None:
@@ -1042,18 +1134,21 @@ def run_formula_validation_task(run_id: int) -> None:
             "run id=%s formula validation started", run.id,
             extra={"run_id": run.id},
         )
-        # Deactivation is driven by the ingested workbook (IsActive + reference-
-        # date window) when present, replacing the hardcoded EBA two-rule list;
-        # fall back to that list (deactivated_rules=None) when no workbook.
+        # Resolve the ingested workbook once for this reporting date: it drives
+        # deactivation (IsActive + window, replacing the hardcoded two-rule list)
+        # AND the per-rule EBA severity (blocking vs non-blocking).
         deactivated: set[str] | None = None
+        severities: dict[str, str] = {}
         try:
             if taxonomy_rules.has_ingested_rules(db, run.snapshot_id):
-                deactivated = taxonomy_rules.build_register_view(
+                view = taxonomy_rules.build_register_view(
                     db, run.snapshot_id, run.reference_date
-                ).deactivated_codes
+                )
+                deactivated = view.deactivated_codes
+                severities = view.severities
         except Exception:  # noqa: BLE001 — fall back to the default list
             logger.exception(
-                "run id=%s: workbook deactivation load failed", run.id,
+                "run id=%s: workbook rule load failed", run.id,
                 extra={"run_id": run.id},
             )
         validator = ArelleFormulaValidator(
@@ -1061,9 +1156,11 @@ def run_formula_validation_task(run_id: int) -> None:
             deactivated_rules=deactivated,
         )
         result = validator.validate_detailed(package_path, taxo)  # never raises
-        findings = result.findings
+        # Re-key formula finding severities to the authoritative EBA workbook
+        # severity, so an error-severity rule that fails blocks submission.
+        findings = [_apply_workbook_severity(f, severities) for f in result.findings]
 
-        run.formula_summary = _build_formula_summary(result)
+        run.formula_summary = _build_formula_summary(result, severities)
         _append_findings(db, run.id, findings)
         _write_validation_report(
             db, run, wf, outputs[-1].filename, settings=settings
