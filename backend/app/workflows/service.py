@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.db import SessionLocal
 from app.core.errors import NotFoundError, ValidationError
 from app.facts import service as facts
 from app.facts.models import RunFile, RunFileRole
@@ -33,13 +34,13 @@ from app.generation import service as generation
 from app.generation.schemas import (
     FactInput,
     FilingIndicatorSpec,
-    GeneratedPackage,
     PackageMetadata,
 )
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import SnapshotStatus
 from app.taxonomy.service import normalize_template_code
 from app.validation import service as validation
+from app.validation.arelle_adapter import ArelleFormulaValidator
 from app.validation.models import Severity, ValidationFinding, ValidationPhase
 from app.validation.schemas import Finding
 from app.workflows.models import Entity, Run, RunStatus, WorkflowConfig
@@ -317,16 +318,60 @@ def list_findings(db: Session, run_id: int) -> list[ValidationFinding]:
     )
 
 
-def _report_header(
-    run: Run, wf: WorkflowConfig, package: GeneratedPackage
-) -> list[str]:
+def _report_header(run: Run, wf: WorkflowConfig, package_filename: str) -> list[str]:
     return [
         f"Run #{run.id}  •  {wf.name}  [{wf.module_code}]",
         f"Entity: {run.entity_lei}.{run.entity_scope}   "
         f"Reference date: {run.reference_date}",
         f"Snapshot: {run.snapshot_id} (release {run.release_id})   "
-        f"Package: {package.filename}",
+        f"Package: {package_filename}",
     ]
+
+
+def _append_findings(db: Session, run_id: int, findings: list[Finding]) -> None:
+    db.add_all(
+        ValidationFinding(run_id=run_id, **f.model_dump()) for f in findings
+    )
+    db.commit()
+
+
+def _write_validation_report(
+    db: Session,
+    run: Run,
+    wf: WorkflowConfig,
+    package_filename: str,
+    *,
+    settings: Settings,
+) -> None:
+    """(Re)write the validation report from all persisted findings for the run."""
+    findings = list_findings(db, run.id)  # ORM rows duck-type the Finding shape
+    report = validation.build_report_text(
+        header_lines=_report_header(run, wf, package_filename), findings=findings
+    )
+    for rf in facts.list_run_files(db, run.id):
+        if rf.role is RunFileRole.validation_report:
+            (settings.data_dir / rf.storage_key).unlink(missing_ok=True)
+            db.delete(rf)
+    db.flush()
+    facts.store_run_file(
+        db,
+        run_id=run.id,
+        role=RunFileRole.validation_report,
+        filename=f"validation_report_run{run.id}.txt",
+        data=report.encode("utf-8"),
+        settings=settings,
+    )
+    db.commit()
+
+
+def _finalise_status(db: Session, run: Run) -> None:
+    has_errors = any(
+        f.severity is Severity.error for f in list_findings(db, run.id)
+    )
+    run.status = (
+        RunStatus.failed_validation if has_errors else RunStatus.generated
+    )
+    db.commit()
 
 
 def execute_run(
@@ -462,30 +507,30 @@ def execute_run(
                 settings=settings,
             )
 
-        # Persist findings, the package (always), and the validation report.
+        # Persist structural findings, the package (always), and the report.
         _persist_findings(db, run.id, findings)
         generation.store_package(db, run_id=run.id, package=package, store=_store)
-        report = validation.build_report_text(
-            header_lines=_report_header(run, wf, package), findings=findings
-        )
-        _store(
-            db, run.id, f"validation_report_run{run.id}.txt",
-            report.encode("utf-8"), role=RunFileRole.validation_report,
+        _write_validation_report(
+            db, run, wf, package.filename, settings=settings
         )
 
-        has_errors = any(f.severity is Severity.error for f in findings)
-        run.status = (
-            RunStatus.failed_validation if has_errors else RunStatus.generated
-        )
-        db.commit()
-        logger.info(
-            "run id=%s %s (%d findings, %d errors)",
-            run.id,
-            run.status.value,
-            len(findings),
-            sum(f.severity is Severity.error for f in findings),
-            extra={"run_id": run.id},
-        )
+        # Formula validation (Arelle) runs as a distinct background phase when
+        # enabled and a taxonomy package is available; otherwise finalise now.
+        if settings.arelle_enabled and taxonomy.snapshot_taxonomy_packages(
+            settings, run.snapshot_id
+        ):
+            run.status = RunStatus.formula_validation_running
+            db.commit()
+            logger.info(
+                "run id=%s structural done; formula validation queued",
+                run.id, extra={"run_id": run.id},
+            )
+        else:
+            _finalise_status(db, run)
+            logger.info(
+                "run id=%s %s (%d findings)", run.id, run.status.value,
+                len(findings), extra={"run_id": run.id},
+            )
     except ValidationError as exc:
         run.status = RunStatus.failed
         run.error = exc.message
@@ -504,6 +549,47 @@ def execute_run(
 
     db.refresh(run)
     return run
+
+
+def run_formula_validation_task(run_id: int) -> None:
+    """Background: run Arelle formula validation and finalise the run.
+
+    Distinct phase after structural. Never crashes the run — the adapter turns
+    any failure into a non-blocking finding.
+    """
+    settings = get_settings()
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        if run is None or run.status is not RunStatus.formula_validation_running:
+            return
+        wf = get_workflow(db, run.workflow_id)
+        outputs = [
+            f
+            for f in facts.list_run_files(db, run.id)
+            if f.role is RunFileRole.package_output
+        ]
+        if not outputs:
+            _finalise_status(db, run)
+            return
+        package_path = settings.data_dir / outputs[-1].storage_key
+        taxo = taxonomy.snapshot_taxonomy_packages(settings, run.snapshot_id)
+
+        logger.info(
+            "run id=%s formula validation started", run.id,
+            extra={"run_id": run.id},
+        )
+        validator = ArelleFormulaValidator(cache_dir=settings.data_dir / "cache")
+        findings = validator.validate(package_path, taxo)  # never raises
+
+        _append_findings(db, run.id, findings)
+        _write_validation_report(
+            db, run, wf, outputs[-1].filename, settings=settings
+        )
+        _finalise_status(db, run)
+        logger.info(
+            "run id=%s formula validation done: %s (%d formula findings)",
+            run.id, run.status.value, len(findings), extra={"run_id": run.id},
+        )
 
 
 # --- run files -------------------------------------------------------------

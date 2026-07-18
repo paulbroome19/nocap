@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+  <!-- Remap the eurofiling.info core files to the vendored copies so the EBA
+       taxonomy resolves fully offline. -->
+  <rewriteURI uriStartString="http://www.eurofiling.info/"
+              rewritePrefix="../www.eurofiling.info/"/>
+  <rewriteURI uriStartString="https://www.eurofiling.info/"
+              rewritePrefix="../www.eurofiling.info/"/>
+</catalog>

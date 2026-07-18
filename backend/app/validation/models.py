@@ -25,6 +25,7 @@ class Severity(enum.StrEnum):
 class ValidationPhase(enum.StrEnum):
     pre_generation = "pre_generation"
     post_generation = "post_generation"
+    formula = "formula"  # Arelle EBA formula rules (v2)
 
 
 class ValidationFinding(Base):

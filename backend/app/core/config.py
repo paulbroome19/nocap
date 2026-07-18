@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # tests (which use their own DB session, not the app's engine).
     reconcile_snapshots_on_startup: bool = True
 
+    # Arelle EBA formula validation (v2). Feature flag to disable entirely; the
+    # per-snapshot taxonomy package(s) live in the snapshot's artifact slot.
+    arelle_enabled: bool = True
+
     @property
     def snapshots_dir(self) -> Path:
         return self.data_dir / "snapshots"
