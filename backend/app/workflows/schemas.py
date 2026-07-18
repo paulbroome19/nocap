@@ -7,6 +7,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.facts.schemas import RunFileOut
+from app.validation.schemas import FindingOut
 from app.workflows.models import RunStatus
 
 
@@ -48,7 +49,8 @@ class RunOut(BaseModel):
 
 
 class RunDetailOut(BaseModel):
-    """Run detail: the run plus its attached files (for download links)."""
+    """Run detail: the run, its attached files, and its validation findings."""
 
     run: RunOut
     files: list[RunFileOut]
+    findings: list[FindingOut]

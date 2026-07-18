@@ -19,6 +19,7 @@ from app.core.db import Base
 # here as it defines models.
 from app.facts import models as _facts_models  # noqa: E402,F401
 from app.taxonomy import models as _taxonomy_models  # noqa: E402,F401
+from app.validation import models as _validation_models  # noqa: E402,F401
 from app.workflows import models as _workflows_models  # noqa: E402,F401
 
 config = context.config

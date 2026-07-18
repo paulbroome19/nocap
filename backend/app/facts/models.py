@@ -78,6 +78,11 @@ class Fact(Base):
     entity: Mapped[str] = mapped_column(String(64))
     reference_date: Mapped[date] = mapped_column(Date)
 
+    # Where this fact came from in the uploaded XLSX, so validation findings can
+    # point at a precise sheet + row. Nullable (non-XLSX / legacy sources).
+    source_sheet: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

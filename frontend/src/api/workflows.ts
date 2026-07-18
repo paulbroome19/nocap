@@ -13,7 +13,24 @@ export type RunStatus =
   | 'files_attached'
   | 'running'
   | 'generated'
+  | 'failed_validation'
   | 'failed'
+
+export type Severity = 'error' | 'warning' | 'info'
+
+export interface Finding {
+  id: number
+  severity: Severity
+  phase: string
+  code: string
+  message: string
+  file: string | null
+  sheet: string | null
+  row: number | null
+  template_code: string | null
+  row_code: string | null
+  column_code: string | null
+}
 
 export interface Run {
   id: number
@@ -42,6 +59,7 @@ export interface RunFile {
 export interface RunDetail {
   run: Run
   files: RunFile[]
+  findings: Finding[]
 }
 
 async function parseError(res: Response): Promise<string> {

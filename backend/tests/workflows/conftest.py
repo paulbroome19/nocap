@@ -48,10 +48,11 @@ def lcr_workflow(db_session: Session) -> WorkflowConfig:
 @pytest.fixture
 def demo_fact_xlsx() -> bytes:
     # Cells that resolve in the mini DPM: (0020,0060)->monetary, (0010,0010)->pct.
+    # The percentage is a ratio (<= 1) so a clean run has zero warnings.
     return fact_xlsx(
         [
             ("C_67.00.a", "0020", "0060", 100000),
-            ("C_67.00.a", "0010", "0010", 1.5),
+            ("C_67.00.a", "0010", "0010", 0.85),
         ]
     )
 
