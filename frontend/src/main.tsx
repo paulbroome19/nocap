@@ -12,11 +12,15 @@ import ReleaseDetail from './pages/ReleaseDetail.tsx'
 import ReferenceData from './pages/ReferenceData.tsx'
 import EntityDetail from './pages/EntityDetail.tsx'
 import Settings from './pages/Settings.tsx'
+import NotFound from './pages/NotFound.tsx'
+import ErrorPage from './pages/ErrorPage.tsx'
+import LegacyRedirect from './components/LegacyRedirect.tsx'
 
 const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
+    errorElement: <ErrorPage />,
     children: [
       { index: true, element: <Navigate to="/reporting" replace /> },
 
@@ -37,10 +41,34 @@ const router = createBrowserRouter([
       // Settings.
       { path: 'settings', element: <Settings /> },
 
-      // Legacy paths → new homes.
+      // --- Legacy paths → new homes (bare + parameterised, all eras) ---------
       { path: 'workflows', element: <Navigate to="/reporting" replace /> },
+      {
+        path: 'workflows/:workflowId',
+        element: (
+          <LegacyRedirect to={(p) => `/reporting/suites/${p.workflowId}`} />
+        ),
+      },
+      // Intermediate restructure path (suite detail lived here in #12/#13).
+      {
+        path: 'reporting/workflows/:workflowId',
+        element: (
+          <LegacyRedirect to={(p) => `/reporting/suites/${p.workflowId}`} />
+        ),
+      },
       { path: 'snapshots', element: <Navigate to="/releases" replace /> },
+      {
+        path: 'snapshots/:snapshotId',
+        element: <LegacyRedirect to={(p) => `/releases/${p.snapshotId}`} />,
+      },
       { path: 'runs', element: <Navigate to="/reporting" replace /> },
+      {
+        path: 'runs/:runId',
+        element: <LegacyRedirect to={(p) => `/reporting/runs/${p.runId}`} />,
+      },
+
+      // Catch-all → styled in-shell 404 (never the default developer page).
+      { path: '*', element: <NotFound /> },
     ],
   },
 ])
