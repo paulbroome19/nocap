@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.taxonomy import artifacts, capabilities, rules, service
+from app.taxonomy import artifacts, capabilities, coherence, rules, service
 from app.taxonomy.models import ReleaseSlot, TaxonomySnapshot
 from app.taxonomy.schemas import (
     CapabilitySetOut,
@@ -55,7 +55,7 @@ def _release_detail(db: Session, snapshot: TaxonomySnapshot) -> ReleaseDetailOut
         ready=artifacts.release_ready(snapshot),
         slots=slots,
         capabilities=CapabilitySetOut(**caps.to_dict()),
-        coherence_warnings=[],  # populated by the coherence check (next checkpoint)
+        coherence_warnings=coherence.coherence_warnings(db, snapshot),
     )
 
 

@@ -14,7 +14,6 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.facts.schemas import FactIngestSummary, RunFileOut
 from app.taxonomy.schemas import TemplateInfo
-from app.validation import register as validation_register
 from app.validation.schemas import FindingOut
 from app.workflows import service
 from app.workflows.models import RunStatus
@@ -238,8 +237,9 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         RegisterRowOut(
             id=r.id, rule=r.rule, source=r.source, template=r.template,
             data_evaluated=r.data_evaluated, result=r.result, detail=r.detail,
+            rule_text=r.rule_text,
         )
-        for r in validation_register.build_register(findings, run.formula_summary)
+        for r in service.build_run_register(db, run, findings)
     ]
     return RunDetailOut(
         run=RunOut.model_validate(run),

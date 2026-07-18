@@ -147,8 +147,9 @@ class RegisterRowOut(BaseModel):
     source: str  # structural | formula
     template: str | None
     data_evaluated: str
-    result: str  # PASSED | FAILED | WARNING | NOTE
+    result: str  # PASSED | FAILED | WARNING | NOTE | DEACTIVATED
     detail: str
+    rule_text: str | None = None
 
 
 class FactRowOut(BaseModel):

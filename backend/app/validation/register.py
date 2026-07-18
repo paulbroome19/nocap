@@ -78,8 +78,10 @@ class RegisterRow:
     source: str  # "structural" | "formula"
     template: str | None  # for the template filter
     data_evaluated: str
-    result: str  # PASSED | FAILED | WARNING | NOTE
+    result: str  # PASSED | FAILED | WARNING | NOTE | DEACTIVATED
     detail: str
+    # The human-readable rule statement (workbook Description), formula rows only.
+    rule_text: str | None = None
 
 
 def _phase(f: Finding) -> str:
@@ -148,7 +150,9 @@ def _structural_rows(findings: Sequence[Finding]) -> list[RegisterRow]:
     return rows
 
 
-def _formula_rows(formula: dict | None) -> list[RegisterRow]:
+def _formula_rows(
+    formula: dict | None, descriptions: dict[str, str]
+) -> list[RegisterRow]:
     if not formula or formula.get("status") != "executed":
         return []
     rows: list[RegisterRow] = []
@@ -173,13 +177,60 @@ def _formula_rows(formula: dict | None) -> list[RegisterRow]:
                 data_evaluated=data_eval,
                 result=rule.get("result", "PASSED"),
                 detail=detail,
+                rule_text=descriptions.get(rule["rule_id"]),
+            )
+        )
+    return rows
+
+
+def _deactivated_rows(
+    formula: dict | None, inactive: dict[str, str]
+) -> list[RegisterRow]:
+    """Rules the taxonomy executed but the workbook deactivated for the run.
+
+    Sourced from the (bounded) deactivations the formula run actually traced.
+    Flagged rather than dropped silently, so the register stays a complete
+    account of what ran.
+    """
+    if not formula:
+        return []
+    rows: list[RegisterRow] = []
+    for code in formula.get("deactivated", []):
+        if code not in inactive:
+            continue  # a non-workbook (hardcoded-fallback) deactivation
+        rows.append(
+            RegisterRow(
+                id=code,
+                rule="Value Assertion",
+                source="formula",
+                template=None,
+                data_evaluated="—",
+                result="DEACTIVATED",
+                detail="excluded — workbook marks this rule inactive for the "
+                "reporting date",
+                rule_text=inactive.get(code) or None,
             )
         )
     return rows
 
 
 def build_register(
-    findings: Sequence[Finding], formula: dict | None
+    findings: Sequence[Finding],
+    formula: dict | None,
+    *,
+    rule_meta: dict | None = None,
 ) -> list[RegisterRow]:
-    """The full rule register: structural rows then formula rows."""
-    return [*_structural_rows(findings), *_formula_rows(formula)]
+    """The full rule register: structural rows, formula rows, deactivated rows.
+
+    ``rule_meta`` (from the ingested validation-rules workbook, resolved for the
+    run's reporting date) carries ``descriptions`` — joined onto formula rows as
+    the human rule statement — and ``inactive`` — codes the workbook deactivated,
+    surfaced as flagged rows. Absent when no workbook is ingested.
+    """
+    descriptions = (rule_meta or {}).get("descriptions", {})
+    inactive = (rule_meta or {}).get("inactive", {})
+    return [
+        *_structural_rows(findings),
+        *_formula_rows(formula, descriptions),
+        *_deactivated_rows(formula, inactive),
+    ]

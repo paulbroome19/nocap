@@ -85,6 +85,21 @@ def _parse_location(text: str) -> dict:
     }
 
 
+def traced_rule_ids(records: list[dict]) -> set[str]:
+    """Every rule id the taxonomy actually traced (evaluated or loaded).
+
+    Used to report only the *relevant* deactivations — the rules the taxonomy
+    executed but were excluded — rather than the entire (possibly thousands-
+    strong, workbook-derived) deactivation set.
+    """
+    ids: set[str] = set()
+    for record in records:
+        m = _ASSERTION_TRACE.search(_message_text(record))
+        if m is not None:
+            ids.add(m.group(2))
+    return ids
+
+
 def findings_from_arelle_records(
     records: list[dict], *, deactivated_rules: set[str]
 ) -> list[Finding]:
@@ -305,7 +320,26 @@ class ArelleFormulaValidator:
         self, *, cache_dir: Path, deactivated_rules: set[str] | None = None
     ) -> None:
         self._cache_dir = cache_dir
-        self._deactivated = load_deactivated_rules(deactivated_rules)
+        # ``deactivated_rules`` is a full override when given (the workbook is the
+        # source of truth for a run's reporting date); ``None`` falls back to the
+        # hardcoded EBA deactivated-rules list.
+        self._deactivated_is_default = deactivated_rules is None
+        self._deactivated = (
+            set(deactivated_rules)
+            if deactivated_rules is not None
+            else load_deactivated_rules()
+        )
+
+    def _reportable_deactivated(self, traced: set[str]) -> list[str]:
+        """The deactivations worth reporting: those the taxonomy actually traced.
+
+        Falls back to the (small) default list when nothing was traced and no
+        workbook override was supplied, so the note is never empty in that case.
+        """
+        relevant = sorted(traced & self._deactivated)
+        if relevant or not self._deactivated_is_default:
+            return relevant
+        return sorted(self._deactivated)
 
     def validate(
         self, package_path: Path, taxonomy_packages: list[Path]
@@ -317,7 +351,7 @@ class ArelleFormulaValidator:
         self, package_path: Path, taxonomy_packages: list[Path]
     ) -> FormulaRun:
         """Run Arelle and return findings + per-rule results for the register."""
-        deactivated = sorted(self._deactivated)
+        deactivated = self._reportable_deactivated(set())
         if not taxonomy_packages:
             reason = "no taxonomy package for this snapshot"
             return FormulaRun(
@@ -373,7 +407,9 @@ class ArelleFormulaValidator:
             rule_results=rule_results,
             available=True,
             loaded=loaded,
-            deactivated=deactivated,
+            # Only the deactivations the taxonomy actually traced — so the note
+            # stays meaningful even when the workbook deactivates thousands.
+            deactivated=self._reportable_deactivated(traced_rule_ids(records)),
             unknown_property_groups=unknown_pg,
         )
 
