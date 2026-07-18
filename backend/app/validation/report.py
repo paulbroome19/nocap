@@ -40,6 +40,11 @@ def _register_rows(register: Sequence[RegisterRow]) -> str:
                 if r.rule_text
                 else ""
             )
+            + (
+                f'<div class="muted">{escape(r.description)}</div>'
+                if r.description and not r.detail
+                else ""
+            )
             + "</td>"
             "</tr>"
         )

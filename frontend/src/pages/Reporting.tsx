@@ -12,9 +12,9 @@ export default function Reporting() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
 
-  const sorted = [...(categories ?? [])].sort((a, b) =>
-    a.category.localeCompare(b.category),
-  )
+  // Server returns categories in curated order (Capital, Liquidity, Financial,
+  // Last Mile Reporting) — preserve it, do not re-sort alphabetically.
+  const ordered = categories ?? []
 
   return (
     <section>
@@ -28,7 +28,7 @@ export default function Reporting() {
         <TableSkeleton rows={4} />
       ) : (
         <Card className="divide-y divide-slate-100">
-          {sorted.map((c) => (
+          {ordered.map((c) => (
             <RowLink
               key={c.category}
               to={`/reporting/${encodeURIComponent(c.category)}`}

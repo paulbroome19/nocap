@@ -4,7 +4,7 @@ import {
   updateWorkflowSettings,
   type WorkflowConfig,
 } from '../api/workflows'
-import { Card, ErrorText, TableSkeleton } from '../components/ui'
+import { Card, ErrorText, Select, TableSkeleton } from '../components/ui'
 
 const CATEGORIES = ['Liquidity', 'Capital', 'Financial', 'Last Mile Reporting']
 
@@ -102,15 +102,11 @@ export default function Settings() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <select
+                      <Select
                         value={wf.category ?? ''}
                         disabled={saving === wf.id}
-                        onChange={(e) =>
-                          void persist(wf, {
-                            category: e.target.value || null,
-                          })
-                        }
-                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-sm text-slate-800 focus:border-slate-500 focus:outline-none"
+                        onChange={(v) => void persist(wf, { category: v || null })}
+                        className="w-52"
                       >
                         <option value="">Uncategorised</option>
                         {CATEGORIES.map((c) => (
@@ -118,7 +114,7 @@ export default function Settings() {
                             {c}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">

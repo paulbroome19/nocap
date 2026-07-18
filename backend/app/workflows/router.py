@@ -30,6 +30,7 @@ from app.workflows.schemas import (
     RunOut,
     RunSummaryOut,
     SuiteSummaryOut,
+    VerdictOut,
     WorkflowConfigOut,
     WorkflowSettingsUpdate,
 )
@@ -218,6 +219,17 @@ def create_run(body: RunCreate, db: Session = Depends(get_db)) -> RunOut:
     return RunOut.model_validate(run)
 
 
+@router.post("/runs/{run_id}/reexecute", response_model=RunOut, status_code=201)
+def reexecute_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
+    """Create a fresh execution of an existing instance (re-execute / resubmit).
+
+    Returns a new run in ``created`` status carrying the source run's instance
+    identity; the caller attaches a fact file and executes it.
+    """
+    run = service.reexecute_run(db, run_id)
+    return RunOut.model_validate(run)
+
+
 @router.get("/runs/{run_id}", response_model=RunDetailOut)
 def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
     run = service.get_run(db, run_id)
@@ -237,7 +249,9 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         RegisterRowOut(
             id=r.id, rule=r.rule, source=r.source, template=r.template,
             data_evaluated=r.data_evaluated, result=r.result, detail=r.detail,
-            rule_text=r.rule_text,
+            rule_text=r.rule_text, description=r.description, severity=r.severity,
+            blocking=r.blocking, evaluations=r.evaluations,
+            satisfied=r.satisfied, not_satisfied=r.not_satisfied,
         )
         for r in service.build_run_register(db, run, findings)
     ]
@@ -249,6 +263,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         filing_indicators=run.filing_indicators,
         rule_register=register,
         formula_summary=run.formula_summary,
+        verdict=VerdictOut(**service.run_verdict(run, findings, run.formula_summary)),
     )
 
 

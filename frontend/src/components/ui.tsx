@@ -162,9 +162,49 @@ export function ErrorText({ children }: { children: ReactNode }) {
 }
 
 export const fieldClass =
-  'w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-900 ' +
-  'focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/5 ' +
+  'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 ' +
+  'transition-colors focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/5 ' +
   'disabled:bg-slate-50 disabled:text-slate-400'
+
+/**
+ * A styled select with a custom chevron — no browser-default dropdown chrome.
+ * Same field language as inputs; children are the `<option>`s.
+ */
+export function Select({
+  value,
+  onChange,
+  disabled,
+  children,
+  className = '',
+}: {
+  value: string | number
+  onChange: (v: string) => void
+  disabled?: boolean
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${fieldClass} cursor-pointer appearance-none pr-9`}
+      >
+        {children}
+      </select>
+      <svg
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        aria-hidden
+        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+      >
+        <path d="M6 8l4 4 4-4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
+  )
+}
 
 export const primaryBtn =
   'rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white ' +
@@ -173,7 +213,3 @@ export const primaryBtn =
 export const secondaryBtn =
   'rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 ' +
   'transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
-
-export const fileInputClass =
-  'text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 ' +
-  'file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-slate-200'

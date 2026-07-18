@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listSnapshots, uploadSnapshot, type Snapshot } from '../api/snapshots'
 import StatusBadge from '../components/StatusBadge'
+import UploadZone from '../components/UploadZone'
 import {
   Card,
   EmptyState,
@@ -9,7 +10,6 @@ import {
   PageHeader,
   TableSkeleton,
   fieldClass,
-  fileInputClass,
   primaryBtn,
 } from '../components/ui'
 import { formatDate } from '../lib/format'
@@ -24,7 +24,6 @@ export default function Releases() {
   const [versionLabel, setVersionLabel] = useState('')
   const [progress, setProgress] = useState<number | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -86,7 +85,7 @@ export default function Releases() {
             Ingestion runs in the background; you can add the taxonomy package and
             reference files from the release page.
           </p>
-          <div className="mt-4 flex flex-wrap items-end gap-3">
+          <div className="mt-4 max-w-lg space-y-3">
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-slate-600">
                 Version label
@@ -99,18 +98,13 @@ export default function Releases() {
                 className={`${fieldClass} w-32`}
               />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-600">
-                DPM database (.accdb)
-              </span>
-              <input
-                ref={fileInput}
-                type="file"
-                accept=".accdb,.mdb"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                className={fileInputClass}
-              />
-            </label>
+            <UploadZone
+              accept=".accdb,.mdb"
+              hint="DPM database · ACCDB / MDB"
+              onFile={setFile}
+              file={file}
+              disabled={progress !== null}
+            />
             <button
               type="button"
               onClick={() => void handleCreate()}

@@ -379,11 +379,15 @@ class RegisterRuleView:
       taxonomy executed but the workbook has deactivated.
     - ``deactivated_codes`` — the full set to exclude from the Arelle results for
       this reporting date. Large (most codes are out-of-window); membership only.
+    - ``severities`` — vr_code → EBA severity of the covering row (e.g.
+      ``"error"`` / ``"warning"``), the authoritative source for whether a
+      failing formula rule is blocking.
     """
 
     descriptions: dict[str, str]
     inactive: dict[str, str]
     deactivated_codes: set[str] = field(default_factory=set)
+    severities: dict[str, str] = field(default_factory=dict)
 
 
 def build_register_view(
@@ -416,9 +420,12 @@ def build_register_view(
 
     active_codes = {c for c, r in best.items() if r.is_active}
     descriptions = dict(any_desc)
+    severities: dict[str, str] = {}
     for c, r in best.items():
         if r.description:
             descriptions[c] = r.description  # covering row's wins
+        if r.severity:
+            severities[c] = r.severity.strip().lower()
 
     inactive_codes = all_codes - active_codes
     inactive = {c: any_desc.get(c, "") for c in inactive_codes}
@@ -426,4 +433,5 @@ def build_register_view(
         descriptions=descriptions,
         inactive=inactive,
         deactivated_codes=inactive_codes,
+        severities=severities,
     )

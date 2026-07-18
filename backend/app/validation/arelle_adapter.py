@@ -144,7 +144,14 @@ def findings_from_arelle_records(
 
 @dataclass
 class RuleResult:
-    """A single formula rule's evaluated result (for the rule register)."""
+    """A single formula rule's evaluated result (for the rule register).
+
+    ``evaluations`` retains the *individual* failing evaluations — one per
+    failing fact/context — rather than collapsing them to counts: each carries
+    the cell reference it evaluated and the compared values. Arelle only emits a
+    per-evaluation message for the unsatisfied cases, so satisfied evaluations
+    are represented by ``satisfied`` count alone.
+    """
 
     rule_id: str
     assertion_type: str  # "Value Assertion" | "Existence Assertion" | ...
@@ -153,6 +160,7 @@ class RuleResult:
     result: str  # "PASSED" | "FAILED"
     values: str | None  # extracted "A >= B" comparison (unsatisfied only)
     message: str | None  # full unsatisfied message, when present
+    evaluations: list[dict] = field(default_factory=list)  # per-failing-eval detail
 
 
 @dataclass
@@ -200,10 +208,12 @@ def rule_results_from_records(
         agg[0] += int(sat)
         agg[1] += int(notsat)
 
-    # Unsatisfied messages (evaluated values) per rule id. Deterministic: keep
-    # the lexicographically-smallest message, not the first-seen (Arelle's
-    # per-fact message order is non-deterministic).
-    messages: dict[str, str] = {}
+    # Per-evaluation detail per rule id: EVERY unsatisfied ``message:`` record is
+    # retained (not collapsed to one), so the register can show which contexts a
+    # rule failed against and the values compared. Deduped by message text and
+    # sorted, so the mapping is order-independent (Arelle's per-fact message order
+    # is non-deterministic).
+    evals: dict[str, dict[str, dict]] = {}
     for record in records:
         m = _ASSERTION_CODE.match(str(record.get("code", "")))
         if m is None:
@@ -212,18 +222,25 @@ def rule_results_from_records(
         if rule_id in deactivated_rules:
             continue
         text = _message_text(record)
-        if rule_id not in messages or text < messages[rule_id]:
-            messages[rule_id] = text
+        if not text or text in evals.get(rule_id, {}):
+            continue
+        fm = _FAILS_BECAUSE.search(text)
+        evals.setdefault(rule_id, {})[text] = {
+            "message": text,
+            "values": fm.group(1).strip() if fm else None,
+            **_parse_location(text),
+        }
+
+    def rule_evaluations(rule_id: str) -> list[dict]:
+        return [evals[rule_id][t] for t in sorted(evals.get(rule_id, {}))]
 
     results: list[RuleResult] = []
     for rule_id, (sat, notsat, atype) in counts.items():
         if sat + notsat == 0:
             continue  # loaded but not evaluated against this submission's data
-        msg = messages.get(rule_id)
-        values = None
-        if msg:
-            fm = _FAILS_BECAUSE.search(msg)
-            values = fm.group(1).strip() if fm else None
+        rule_evals = rule_evaluations(rule_id)
+        # Summary message/values: the first evaluation (deterministic order).
+        first = rule_evals[0] if rule_evals else None
         results.append(
             RuleResult(
                 rule_id=rule_id,
@@ -231,8 +248,9 @@ def rule_results_from_records(
                 satisfied=sat,
                 not_satisfied=notsat,
                 result="FAILED" if notsat > 0 else "PASSED",
-                values=values,
-                message=msg,
+                values=first["values"] if first else None,
+                message=first["message"] if first else None,
+                evaluations=rule_evals,
             )
         )
     results.sort(key=lambda r: (r.result != "FAILED", r.rule_id))

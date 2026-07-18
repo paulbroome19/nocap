@@ -52,7 +52,12 @@ def test_configs_endpoint_filtering(client, db_session: Session) -> None:
 
 def test_categories_endpoint_counts(client, db_session: Session) -> None:
     seed_workflow_configs(db_session)
-    cats = {c["category"]: c for c in client.get("/api/workflows/categories").json()}
+    body = client.get("/api/workflows/categories").json()
+    # Curated display order — Capital leads, not alphabetical.
+    assert [c["category"] for c in body] == [
+        "Capital", "Liquidity", "Financial", "Last Mile Reporting",
+    ]
+    cats = {c["category"]: c for c in body}
     assert set(cats) == set(ACTIVE)
     assert cats["Liquidity"]["active_count"] == 4
     assert cats["Capital"]["active_count"] == 4

@@ -20,6 +20,7 @@ import {
   ErrorText,
   Loading,
   PageHeader,
+  Select,
   fieldClass,
   primaryBtn,
   secondaryBtn,
@@ -240,12 +241,9 @@ function WorkflowConfigSection({
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-slate-600">Workflow</span>
-          <select
-            className={fieldClass}
+          <Select
             value={workflowId}
-            onChange={(e) =>
-              setWorkflowId(e.target.value === '' ? '' : Number(e.target.value))
-            }
+            onChange={(v) => setWorkflowId(v === '' ? '' : Number(v))}
           >
             <option value="">Select…</option>
             {workflows.map((w) => (
@@ -253,18 +251,15 @@ function WorkflowConfigSection({
                 {w.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-slate-600">
             Release (for template list)
           </span>
-          <select
-            className={fieldClass}
+          <Select
             value={releaseId}
-            onChange={(e) =>
-              setReleaseId(e.target.value === '' ? '' : Number(e.target.value))
-            }
+            onChange={(v) => setReleaseId(v === '' ? '' : Number(v))}
           >
             <option value="">Select…</option>
             {releases.map((r) => (
@@ -272,7 +267,7 @@ function WorkflowConfigSection({
                 {r.version_label} — {r.original_filename}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
 

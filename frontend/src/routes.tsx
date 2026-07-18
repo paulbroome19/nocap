@@ -4,7 +4,12 @@ import App from './App.tsx'
 import Reporting from './pages/Reporting.tsx'
 import CategoryPage from './pages/CategoryPage.tsx'
 import SuitePage from './pages/SuitePage.tsx'
-import RunDetail from './pages/RunDetail.tsx'
+import RunLayout from './pages/run/RunLayout.tsx'
+import RunCover from './pages/run/RunCover.tsx'
+import RunInput from './pages/run/RunInput.tsx'
+import RunIndicators from './pages/run/RunIndicators.tsx'
+import RunValidation from './pages/run/RunValidation.tsx'
+import RunPackage from './pages/run/RunPackage.tsx'
 import Releases from './pages/Releases.tsx'
 import ReleaseDetail from './pages/ReleaseDetail.tsx'
 import ReferenceData from './pages/ReferenceData.tsx'
@@ -28,7 +33,18 @@ export const routes: RouteObject[] = [
       { path: 'reporting', element: <Reporting /> },
       { path: 'reporting/:category', element: <CategoryPage /> },
       { path: 'reporting/suites/:workflowId', element: <SuitePage /> },
-      { path: 'reporting/runs/:runId', element: <RunDetail /> },
+      // A run is a submission-instance cover with per-stage sub-pages.
+      {
+        path: 'reporting/runs/:runId',
+        element: <RunLayout />,
+        children: [
+          { index: true, element: <RunCover /> },
+          { path: 'input', element: <RunInput /> },
+          { path: 'indicators', element: <RunIndicators /> },
+          { path: 'validation', element: <RunValidation /> },
+          { path: 'package', element: <RunPackage /> },
+        ],
+      },
 
       // Taxonomy Releases.
       { path: 'releases', element: <Releases /> },

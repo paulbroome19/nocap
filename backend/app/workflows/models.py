@@ -50,10 +50,13 @@ class RunStatus(enum.StrEnum):
     formula_validation_running = "formula_validation_running"
 
 
-# The reporting categories a suite can belong to (used for the Reporting UI).
+# The reporting categories a suite can belong to. This tuple is the *curated
+# display order* for the Reporting UI (capital adequacy leads, then liquidity,
+# financial, and last-mile), not alphabetical — category_summaries iterates it
+# directly, so the frontend renders categories in this order.
 WORKFLOW_CATEGORIES = (
-    "Liquidity",
     "Capital",
+    "Liquidity",
     "Financial",
     "Last Mile Reporting",
 )
