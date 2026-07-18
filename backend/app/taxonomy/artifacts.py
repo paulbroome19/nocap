@@ -85,6 +85,17 @@ SLOT_SPECS: tuple[SlotSpec, ...] = (
         ),
     ),
     SlotSpec(
+        slot=ReleaseSlot.validation_rules,
+        label="Validation rules",
+        requirement="register",
+        accept=(".xlsx",),
+        description=(
+            "EBA validation-rules workbook (.xlsx). Ingested into the rule "
+            "register so formula findings carry the rule statement and "
+            "activation is driven by the reporting date."
+        ),
+    ),
+    SlotSpec(
         slot=ReleaseSlot.filing_rules,
         label="Filing rules",
         requirement="reference",
@@ -291,6 +302,12 @@ def store_artifact(
         raise ValidationError(
             "the DPM database is set when the release is created; use re-ingest "
             "to rebuild it"
+        )
+    if slot is ReleaseSlot.validation_rules:
+        # The workbook is header-verified + ingested as a background job (see
+        # taxonomy.rules), not stored via the light synchronous path here.
+        raise ValidationError(
+            "the validation-rules workbook is ingested via its own upload path"
         )
     spec = _SPEC_BY_SLOT[slot]
     if not data:

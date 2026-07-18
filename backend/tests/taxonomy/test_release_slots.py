@@ -163,7 +163,8 @@ def test_artifacts_endpoint_returns_slots(client, db_session, mini_dpm: Path) ->
     body = resp.json()
     assert body["ready"] is True
     assert {s["slot"] for s in body["slots"]} == {
-        "dpm_database", "taxonomy_package", "filing_rules", "sample_files"
+        "dpm_database", "taxonomy_package", "validation_rules",
+        "filing_rules", "sample_files",
     }
 
 

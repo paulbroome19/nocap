@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.taxonomy import artifacts, service
-from app.taxonomy.models import TaxonomySnapshot
+from app.taxonomy import artifacts, rules, service
+from app.taxonomy.models import ReleaseSlot, TaxonomySnapshot
 from app.taxonomy.schemas import ReleaseDetailOut, ReleaseSlotOut, SnapshotOut
 
 router = APIRouter()
@@ -85,16 +85,28 @@ def release_artifacts(
 async def upload_release_artifact(
     snapshot_id: int,
     slot: str,
+    background: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> ReleaseDetailOut:
-    """Upload a file into a slot (taxonomy package / filing rules / samples)."""
+    """Upload a file into a slot (taxonomy package / validation rules / …).
+
+    The validation-rules workbook is header-verified here then ingested in the
+    background (its slot shows ``verifying`` until done); other slots are stored
+    with a synchronous light check.
+    """
     snapshot = service.get_snapshot(db, snapshot_id)
     parsed = artifacts.parse_slot(slot)
     data = await file.read()
-    artifacts.store_artifact(
-        db, snapshot, parsed, filename=file.filename or "upload", data=data
-    )
+    if parsed is ReleaseSlot.validation_rules:
+        rules.store_workbook(
+            db, snapshot, filename=file.filename or "rules.xlsx", data=data
+        )
+        background.add_task(rules.ingest_validation_rules_task, snapshot.id)
+    else:
+        artifacts.store_artifact(
+            db, snapshot, parsed, filename=file.filename or "upload", data=data
+        )
     db.refresh(snapshot)
     return _release_detail(db, snapshot)
 
