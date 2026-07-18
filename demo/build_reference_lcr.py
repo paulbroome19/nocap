@@ -1,18 +1,18 @@
-"""Generate demo/fact_full.xlsx — the "full run" hero file for the demo.
+"""Generate demo/reference_lcr_full.xlsx — the full COREP LCR reference dataset.
 
-A fuller COREP LCR fact set engineered so a meaningful number of the module's
+A complete COREP LCR fact set engineered so a meaningful number of the module's
 formula assertions actually evaluate. It populates every closed cell of the
 C_72.00 (Liquid Assets) and C_76.00 (LCR calculation) tables with values
 consistent with the rule arithmetic (0 satisfies the sum/inequality rules that
 default missing operands to 0), and deliberately mis-sets three cells so a
 handful of rules FAIL with real comparison detail.
 
-Focused on C_72/C_76 so the run evaluates in a demo-tolerable window (~2 min of
+Focused on C_72/C_76 so the run evaluates in a tolerable window (~2 min of
 Arelle) rather than the full module's many minutes.
 
 Requires the real EBA 4.2 DPM ingested as snapshot 1 (backend/data). Re-run:
 
-    python demo/build_fact_full.py
+    python demo/build_reference_lcr.py
 
 Verified live: 52 assertions evaluated, 46 satisfied, 6 unsatisfied (~115 s).
 """
@@ -78,7 +78,7 @@ def main() -> None:
     ws.append(["report", "row", "column", "value"])
     for (t, r, c), v in sorted(facts.items()):
         ws.append([t, r, c, v])
-    out = HERE / "fact_full.xlsx"
+    out = HERE / "reference_lcr_full.xlsx"
     wb.save(out)
     print(f"wrote {out} ({len(facts)} facts, 3 deliberate failures)")
 

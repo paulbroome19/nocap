@@ -1,4 +1,4 @@
-"""Generate the demo input files for a COREP LCR run — three "acts".
+"""Generate the small COREP LCR sample fact files (see demo/README.md).
 
 The (template, row, column) combinations are real cells from the EBA DPM 2.0
 v4.2 release (module COREP_LCR_DA), so the data resolves. All entity data is
@@ -8,7 +8,7 @@ fictional. Re-run to regenerate:
 
 By default a run derives its filing indicators + parameters in-system, so only a
 fact file is needed. ``indicators_params.xlsx`` is the optional "advanced"
-override, paired with the warnings act below.
+override, paired with the warnings set below.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ HERE = Path(__file__).parent
 
 REFERENCE_DATE = date(2025, 12, 31)
 
-# --- Act 1: golden — validates fully clean (derived indicators/params) --------
+# --- Minimal clean set — validates fully clean (derived indicators/params) ----
 # C_76.00.a r0030 is a percentage datapoint; a ratio (<= 1) keeps it clean.
 GOLDEN_ROWS = [
     ("C_73_00_a", "0010", "0010", 4500000),  # upstream underscore form
@@ -35,7 +35,7 @@ GOLDEN_ROWS = [
     ("C_76.00.a", "0030", "0010", 0.87),  # ratio -> clean
 ]
 
-# --- Act 2: warnings — PERCENTAGE_NOT_RATIO + EMPTY_FILING_INDICATOR -----------
+# --- Warnings set — PERCENTAGE_NOT_RATIO + EMPTY_FILING_INDICATOR --------------
 # Run WITH indicators_params.xlsx (override) to also surface the empty indicator.
 WARNINGS_ROWS = [
     ("C_73.00.a", "0010", "0010", 4500000),
@@ -44,7 +44,7 @@ WARNINGS_ROWS = [
     ("C_76.00.a", "0030", "0010", 1.45),  # percentage > 1 -> PERCENTAGE_NOT_RATIO
 ]
 
-# --- Act 3: broken — errors -> failed_validation ------------------------------
+# --- Malformed set — errors -> failed_validation ------------------------------
 BROKEN_ROWS = [
     ("C_73.00.a", "0010", "0010", 4500000),  # ok
     ("C_73.00.a", "9999", "9999", 1),  # UNRESOLVED_FACT
@@ -52,7 +52,7 @@ BROKEN_ROWS = [
 ]
 
 # Advanced override: lists C_72.00.a (never has facts -> empty) plus the reported
-# templates, so the warnings act shows EMPTY_FILING_INDICATOR.
+# templates, so the warnings set shows EMPTY_FILING_INDICATOR.
 OVERRIDE_INDICATORS = ["C_72.00.a", "C_73.00.a", "C_74.00.a", "C_76.00.a"]
 
 
