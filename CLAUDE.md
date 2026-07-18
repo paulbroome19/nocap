@@ -208,3 +208,28 @@ EBA formula rules in v1.
 - Type hints everywhere; pydantic schemas at all boundaries.
 - Structured logging with run id on every log line once a run starts.
 - No real bank data, ever, in this environment. All demo values are fictional.
+
+## Design principles
+
+The product is a regulated-submission platform. Correctness and trust outrank
+convenience. Apply these to every new surface and stage.
+
+1. **Airtight over flexible — no partial states.** A thing either exists,
+   complete and valid, or it does not exist. A release is created only when all
+   of its mandatory artifacts verify; a failure creates nothing. Prefer an
+   all-or-nothing transaction to a half-built record the user must repair.
+2. **Every input validated on arrival, with plain-language failures.** Check
+   each input at the boundary, the moment it enters, and reject it with a
+   sentence a reporter understands — naming what was expected in the source's
+   own terms (e.g. "download the DPM 2.0 Access database from the EBA"), not a
+   stack trace or an error code.
+3. **Business vocabulary on all surfaces; technical identifiers are evidence,
+   not interface.** Users see "EBA Taxonomy 4.2", not `snapshot #7` or a raw
+   filename. Checksums, storage keys, and internal ids live behind an
+   audit-details disclosure — present for provenance, never the primary label.
+4. **Only runtime inputs appear as user inputs.** A field is shown to the user
+   only if it genuinely varies per use. Anything derivable is derived; anything
+   fixed is fixed. Don't surface a control for a value the system already knows.
+5. **Every action is recorded.** Creation, execution, deletion, re-execution —
+   each leaves a durable, timestamped trace. History is append-only; the current
+   state is a view over recorded events, never a value edited in place.
