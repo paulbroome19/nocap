@@ -19,6 +19,8 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+# The CREATE TABLE creates these native enum types (default create_type=True);
+# they are dropped explicitly in downgrade (drop_table does not drop them).
 release_slot = sa.Enum(
     'dpm_database', 'taxonomy_package', 'filing_rules', 'sample_files',
     name='release_slot',
@@ -29,9 +31,6 @@ artifact_status = sa.Enum(
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    release_slot.create(bind, checkfirst=True)
-    artifact_status.create(bind, checkfirst=True)
     op.create_table(
         'release_artifact',
         sa.Column('id', sa.Integer(), nullable=False),
