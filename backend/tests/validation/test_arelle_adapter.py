@@ -67,6 +67,39 @@ def test_maps_records_to_findings() -> None:
     assert err.template_code == "D_07.00.a" and err.row_code == "0260"
 
 
+def test_findings_are_order_independent() -> None:
+    """Arelle emits per-fact messages in a non-deterministic order; extraction
+    must be deterministic (same findings regardless of record order) — this is
+    what makes cached and uncached validations produce identical findings."""
+    import random
+
+    # A rule firing on three facts, plus another rule.
+    records = [
+        {"code": "message:v16053_m_2", "level": "warning", "message": {"text":
+            "v16053_m: {D_02.00.a,0060,0300,} >= x Fails because 3 >= 9."}},
+        {"code": "message:v16053_m_0", "level": "warning", "message": {"text":
+            "v16053_m: {D_02.00.a,0060,0100,} >= x Fails because 1 >= 9."}},
+        {"code": "message:v16053_m_1", "level": "warning", "message": {"text":
+            "v16053_m: {D_02.00.a,0060,0200,} >= x Fails because 2 >= 9."}},
+        {"code": "message:v89377_m_0", "level": "error", "message": {"text":
+            "v89377_m: {D_07.00.a,0260,0030,} <= y Fails because 7 <= 6."}},
+    ]
+
+    def canon(recs):
+        f = findings_from_arelle_records(recs, deactivated_rules=set())
+        rr, loaded = rule_results_from_records(recs, deactivated_rules=set())
+        return (
+            [(x.code, x.message, x.row_code, x.column_code) for x in f],
+            [(x.rule_id, x.result, x.values, x.message) for x in rr],
+        )
+
+    baseline = canon(records)
+    for _ in range(8):
+        shuffled = records[:]
+        random.shuffle(shuffled)
+        assert canon(shuffled) == baseline  # identical regardless of order
+
+
 def test_deactivated_default_list() -> None:
     rules = load_deactivated_rules()
     assert "v6272_m" in rules and "v23336_m" in rules
