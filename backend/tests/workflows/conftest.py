@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
-from app.workflows.models import WorkflowConfig
+from app.workflows.models import Entity, WorkflowConfig
 from tests.facts._xlsx import fact_xlsx, indicators_params_xlsx
 
 ENTITY = "5299001234567890ABCD"
@@ -43,6 +43,20 @@ def lcr_workflow(db_session: Session) -> WorkflowConfig:
     db_session.commit()
     db_session.refresh(wf)
     return wf
+
+
+@pytest.fixture
+def entity(db_session: Session) -> Entity:
+    e = Entity(
+        name="Meridian Group Holdings plc",
+        lei=ENTITY,
+        country="GB",
+        default_scope="CON",
+    )
+    db_session.add(e)
+    db_session.commit()
+    db_session.refresh(e)
+    return e
 
 
 @pytest.fixture

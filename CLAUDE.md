@@ -88,17 +88,34 @@ in every stage.
 
 ## Input contracts
 
+The **fact file is the only required input**. Filing indicators and package
+parameters are **derived in-system** by default (see below); an uploaded
+indicators/parameters file is an optional "advanced" override.
+
 1. **Fact file (XLSX):** columns are report, row, column, value — confirmed sample:
-   `C_67_00, 0010, 0010, 100000`. The upstream system writes template codes with
-   underscores (`C_67_00`); the DPM uses the EBA form (`C 67.00`). Normalise on ingest
-   (accept both forms; store the canonical EBA form). Row/column are 4-digit EBA codes —
-   preserve leading zeros (never let them become integers). Open/dynamic tables use a
-   placeholder row convention from the upstream system (e.g. `9990`) — carry the
-   identifier through as-is in v1; proper open-table keying is a v2 concern.
-2. **Indicators & parameters file:** filing indicators (which templates are reported)
-   and package parameters (entity LEI, reference date, base currency, decimals).
-   Exact layout to be pinned against a real sample — build the parser behind an
-   interface so the format can shift without touching generation.
+   `C_67_00, 0010, 0010, 100000`. Three template-code forms exist and are all
+   accepted: upstream `C_67_00`, DPM/DB `C_67.00`, EBA display `C 67.00`. The
+   canonical stored form is the **DB form `C_67.00`** (the space form appears
+   nowhere in the DPM 2.0 database). Row/column are 4-digit EBA codes — preserve
+   leading zeros (never let them become integers). Open/dynamic tables (DPM marks
+   them with a `KeyID` on the table version) are **not generated in v1**: a fact
+   targeting one yields a clear `OPEN_TABLE_UNSUPPORTED` validation error rather
+   than a malformed CSV. Proper open-table keying is a v2 concern.
+2. **Derived indicators & parameters (default):** the run derives these from the
+   fact data + the selected entity, so no second file is needed:
+   - *Filing indicators*: every module template, reported iff it has (resolvable,
+     closed-table) facts.
+   - *Parameters*: `entityID` from the entity's LEI + scope, `refPeriod` from the
+     run's reference date, `baseCurrency` from a run setting (default EUR),
+     `decimals` from a run field (default -3).
+3. **Indicators & parameters file (optional override):** filing indicators plus
+   package parameters (entity LEI, reference date, base currency, decimals). The
+   parser lives behind an interface so the layout can shift without touching
+   generation; when uploaded it replaces the derived values. Validation checks
+   the derived outputs exactly as it checks uploaded ones.
+
+Entities are selected from a lookup (name, LEI, country, default scope); the run
+captures the entity's LEI/country/scope at creation for reproducibility.
 
 Parse defensively: trim whitespace, tolerate numeric-vs-text cells for codes, reject
 with precise row-level error messages (file, sheet, row number, what was wrong).

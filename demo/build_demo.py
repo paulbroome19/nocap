@@ -1,12 +1,14 @@
-"""Generate the demo input files for a COREP LCR run.
+"""Generate the demo input files for a COREP LCR run — three "acts".
 
-The (template, row, column) combinations below were derived from the real EBA
-DPM 2.0 v4.2 release (module COREP_LCR_DA), so the data actually resolves to
-datapoints. All entity data is fictional. Re-run to regenerate the XLSX files:
+The (template, row, column) combinations are real cells from the EBA DPM 2.0
+v4.2 release (module COREP_LCR_DA), so the data resolves. All entity data is
+fictional. Re-run to regenerate:
 
     python demo/build_demo.py
 
-Requires openpyxl (a backend dependency).
+By default a run derives its filing indicators + parameters in-system, so only a
+fact file is needed. ``indicators_params.xlsx`` is the optional "advanced"
+override, paired with the warnings act below.
 """
 
 from __future__ import annotations
@@ -18,67 +20,80 @@ from openpyxl import Workbook
 
 HERE = Path(__file__).parent
 
-# Fictional filer.
-ENTITY_LEI = "5299001234567890ABCD"  # 20 alphanumeric chars, not a real LEI
 REFERENCE_DATE = date(2025, 12, 31)
-BASE_CURRENCY = "EUR"
-DECIMALS = -3
 
-# Real resolving cells (template, row, column, fictional value). Template codes
-# are written in a MIX of the accepted forms on purpose (upstream underscores,
-# EBA display space, DB form) to exercise normalisation end-to-end.
-FACT_ROWS = [
-    # C_73.00.a (Outflows) — upstream underscore form
-    ("C_73_00_a", "0010", "0010", 4500000),
+# --- Act 1: golden — validates fully clean (derived indicators/params) --------
+# C_76.00.a r0030 is a percentage datapoint; a ratio (<= 1) keeps it clean.
+GOLDEN_ROWS = [
+    ("C_73_00_a", "0010", "0010", 4500000),  # upstream underscore form
     ("C_73_00_a", "0020", "0010", 1250000),
     ("C_73_00_a", "0030", "0010", 830000),
-    # C_74.00.a (Inflows) — EBA display (space) form
-    ("C 74.00.a", "0010", "0010", 2100000),
+    ("C 74.00.a", "0010", "0010", 2100000),  # EBA display (space) form
     ("C 74.00.a", "0020", "0010", 640000),
-    ("C 74.00.a", "0030", "0010", 55000),
-    # C_76.00.a (Calculations) — DB form
-    ("C_76.00.a", "0010", "0010", 6800000),
+    ("C_76.00.a", "0010", "0010", 6800000),  # DB form
     ("C_76.00.a", "0020", "0010", 5400000),
-    ("C_76.00.a", "0030", "0010", 1.32),  # a percentage datapoint
+    ("C_76.00.a", "0030", "0010", 0.87),  # ratio -> clean
 ]
 
-# Templates reported (filing indicators). DB form; the parser normalises anyway.
-FILING_INDICATORS = ["C_72.00.a", "C_73.00.a", "C_74.00.a", "C_76.00.a"]
+# --- Act 2: warnings — PERCENTAGE_NOT_RATIO + EMPTY_FILING_INDICATOR -----------
+# Run WITH indicators_params.xlsx (override) to also surface the empty indicator.
+WARNINGS_ROWS = [
+    ("C_73.00.a", "0010", "0010", 4500000),
+    ("C_73.00.a", "0020", "0010", 1250000),
+    ("C_76.00.a", "0010", "0010", 6800000),
+    ("C_76.00.a", "0030", "0010", 1.45),  # percentage > 1 -> PERCENTAGE_NOT_RATIO
+]
+
+# --- Act 3: broken — errors -> failed_validation ------------------------------
+BROKEN_ROWS = [
+    ("C_73.00.a", "0010", "0010", 4500000),  # ok
+    ("C_73.00.a", "9999", "9999", 1),  # UNRESOLVED_FACT
+    ("C_74.00.a", "0010", "0010", "not-a-number"),  # DATATYPE_MISMATCH (monetary)
+]
+
+# Advanced override: lists C_72.00.a (never has facts -> empty) plus the reported
+# templates, so the warnings act shows EMPTY_FILING_INDICATOR.
+OVERRIDE_INDICATORS = ["C_72.00.a", "C_73.00.a", "C_74.00.a", "C_76.00.a"]
 
 
-def build_fact_file(path: Path) -> None:
+def _fact_file(path: Path, rows: list) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "facts"
     ws.append(["report", "row", "column", "value"])
-    for report, row, col, value in FACT_ROWS:
-        ws.append([report, row, col, value])
+    for r in rows:
+        ws.append(list(r))
     wb.save(path)
 
 
 def build_indicators_params_file(path: Path) -> None:
     wb = Workbook()
-
     params = wb.active
     params.title = "parameters"
-    params.append(["entity_lei", ENTITY_LEI])
+    params.append(["entity_lei", "213800MERIDNGRPHLD42"])  # fictional (Meridian)
     params.append(["reference_date", REFERENCE_DATE])
-    params.append(["base_currency", BASE_CURRENCY])
-    params.append(["decimals", DECIMALS])
+    params.append(["base_currency", "EUR"])
+    params.append(["decimals", -3])
 
     indicators = wb.create_sheet("filing_indicators")
     indicators.append(["template", "reported"])
-    for code in FILING_INDICATORS:
+    for code in OVERRIDE_INDICATORS:
         indicators.append([code, True])
-
     wb.save(path)
 
 
 def main() -> None:
-    build_fact_file(HERE / "fact_sample.xlsx")
+    _fact_file(HERE / "fact_sample.xlsx", GOLDEN_ROWS)
+    _fact_file(HERE / "fact_sample_warnings.xlsx", WARNINGS_ROWS)
+    _fact_file(HERE / "fact_broken.xlsx", BROKEN_ROWS)
     build_indicators_params_file(HERE / "indicators_params.xlsx")
-    print(f"wrote {HERE / 'fact_sample.xlsx'}")
-    print(f"wrote {HERE / 'indicators_params.xlsx'}")
+    for name in (
+        "fact_sample.xlsx",
+        "fact_sample_warnings.xlsx",
+        "fact_broken.xlsx",
+        "indicators_params.xlsx",
+    ):
+        print(f"wrote {HERE / name}")
 
 
 if __name__ == "__main__":

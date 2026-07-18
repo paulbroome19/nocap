@@ -28,7 +28,7 @@ CREATE TABLE ModuleVersion (ModuleVID INTEGER PRIMARY KEY, ModuleID INTEGER, Cod
     StartReleaseID INTEGER, EndReleaseID INTEGER, VersionNumber TEXT, Name TEXT);
 CREATE TABLE ModuleVersionComposition (ModuleVID INTEGER, TableID INTEGER, TableVID INTEGER);
 CREATE TABLE TableVersion (TableVID INTEGER PRIMARY KEY, TableID INTEGER, Code TEXT, Name TEXT,
-    StartReleaseID INTEGER, EndReleaseID INTEGER);
+    StartReleaseID INTEGER, EndReleaseID INTEGER, KeyID INTEGER);
 CREATE TABLE Header (HeaderID INTEGER PRIMARY KEY, TableID INTEGER, Direction TEXT);
 CREATE TABLE HeaderVersion (HeaderVID INTEGER PRIMARY KEY, HeaderID INTEGER, Code TEXT,
     StartReleaseID INTEGER, EndReleaseID INTEGER);
@@ -51,10 +51,12 @@ _ROWS = {
     "ModuleVersion": [
         (10, 1, "COREP_LCR_DA", 1, None, "3.3.0", "LCR Delegated Act - COREP"),
     ],
-    "ModuleVersionComposition": [(10, 500, 100), (10, 501, 101)],
+    "ModuleVersionComposition": [(10, 500, 100), (10, 501, 101), (10, 502, 102)],
     "TableVersion": [
-        (100, 500, "C_67.00.a", "Concentration of funding by counterparty", 1, None),
-        (101, 501, "C_72.00.a", "Liquidity Coverage. Liquid assets", 1, None),
+        # KeyID NULL => closed table; set => open/keyed (v1-unsupported).
+        (100, 500, "C_67.00.a", "Concentration of funding", 1, None, None),
+        (101, 501, "C_72.00.a", "Liquidity Coverage. Liquid assets", 1, None, None),
+        (102, 502, "C_77.00", "Perimeter of consolidation", 1, None, 999),
     ],
     "Header": [
         (1, 500, "Y"),  # row 0010

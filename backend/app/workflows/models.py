@@ -59,6 +59,25 @@ class WorkflowConfig(Base):
     )
 
 
+class Entity(Base):
+    """A reporting entity, selected when starting a run.
+
+    LEI + country + default scope are captured on the run at creation, so a run
+    stays reproducible even if the entity record later changes.
+    """
+
+    __tablename__ = "entity"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    lei: Mapped[str] = mapped_column(String(20), unique=True)
+    country: Mapped[str] = mapped_column(String(2))  # ISO 2-letter
+    default_scope: Mapped[str] = mapped_column(String(16))  # IND | CON
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Run(Base):
     __tablename__ = "run"
 
@@ -73,9 +92,17 @@ class Run(Base):
     release_id: Mapped[int] = mapped_column(Integer)
 
     reference_date: Mapped[date] = mapped_column(Date)
+    # Entity is captured by reference and denormalised for reproducibility.
+    entity_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("entity.id"), nullable=True
+    )
     entity_lei: Mapped[str] = mapped_column(String(64))
     entity_scope: Mapped[str] = mapped_column(String(16))  # IND | CON
     country: Mapped[str] = mapped_column(String(2), default="XX")
+
+    # Package parameters (derived defaults; overridable per run).
+    base_currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    decimals: Mapped[int] = mapped_column(Integer, default=-3)
 
     status: Mapped[RunStatus] = mapped_column(
         Enum(RunStatus, name="run_status"), default=RunStatus.created

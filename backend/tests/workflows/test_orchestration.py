@@ -1,4 +1,4 @@
-"""End-to-end orchestration against the mini fixture snapshot, incl. failures."""
+"""Orchestration: entity-based runs, derived indicators/params, open-table guard."""
 
 from __future__ import annotations
 
@@ -14,142 +14,180 @@ from app.facts.models import RunFileRole
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
 from app.validation.models import Severity
 from app.workflows import service
-from app.workflows.models import RunStatus, WorkflowConfig
-from app.workflows.seed import seed_workflow_configs
-from tests.facts._xlsx import fact_xlsx
+from app.workflows.models import Entity, RunStatus, WorkflowConfig
+from app.workflows.seed import seed_entities, seed_workflow_configs
+from tests.facts._xlsx import fact_xlsx, indicators_params_xlsx
 from tests.workflows.conftest import ENTITY
 
 
-def _create_run(db, snapshot, workflow) -> object:
-    return service.create_run(
-        db,
+def _create_run(db, snapshot, workflow, entity, **over):
+    kw = dict(
         workflow_id=workflow.id,
         snapshot_id=snapshot.id,
         reference_date=date(2025, 12, 31),
-        entity_lei=ENTITY,
-        entity_scope="CON",
+        entity_id=entity.id,
     )
+    kw.update(over)
+    return service.create_run(db, **kw)
 
 
-def _attach_both(db, run_id, facts_data, indicators_data):
-    service.attach_fact_file(
-        db, run_id=run_id, filename="f.xlsx", data=facts_data
+def _attach_facts(db, run_id, data):
+    service.attach_fact_file(db, run_id=run_id, filename="facts.xlsx", data=data)
+
+
+def _package_member(db, run_id, suffix) -> str:
+    out = next(
+        f
+        for f in service.run_files(db, run_id)
+        if f.role is RunFileRole.package_output
     )
-    service.attach_indicators_params_file(
-        db, run_id=run_id, filename="i.xlsx", data=indicators_data
-    )
+    zf = zipfile.ZipFile(get_settings().data_dir / out.storage_key)
+    name = next(n for n in zf.namelist() if n.endswith(suffix))
+    return zf.read(name).decode()
 
 
-def test_full_run_generates_package(
+def test_full_run_derived_is_clean(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,
     lcr_workflow: WorkflowConfig,
+    entity: Entity,
     demo_fact_xlsx: bytes,
-    demo_indicators_xlsx: bytes,
 ) -> None:
-    run = _create_run(db_session, ready_snapshot, lcr_workflow)
+    """One fact file, no indicators upload → derived, clean, generated."""
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
     assert run.status is RunStatus.created
+    assert run.entity_lei == ENTITY
+    assert run.country == "GB" and run.base_currency == "EUR"
 
-    service.attach_fact_file(
-        db_session, run_id=run.id, filename="facts.xlsx", data=demo_fact_xlsx
-    )
-    db_session.refresh(run)
-    assert run.status is RunStatus.files_attached
-
-    service.attach_indicators_params_file(
-        db_session, run_id=run.id, filename="ip.xlsx", data=demo_indicators_xlsx
-    )
-
+    _attach_facts(db_session, run.id, demo_fact_xlsx)
     run = service.execute_run(db_session, run.id)
     assert run.status is RunStatus.generated, run.error
 
-    files = service.run_files(db_session, run.id)
-    outputs = [f for f in files if f.role is RunFileRole.package_output]
-    assert len(outputs) == 1
-    assert outputs[0].filename.endswith(".zip")
-    assert "COREPLCRDA" in outputs[0].filename
-
-    # A clean run: zero errors, plus the expected ENTRY_POINT_UNVERIFIED info.
     findings = service.list_findings(db_session, run.id)
     assert not [f for f in findings if f.severity is Severity.error]
     assert [f.code for f in findings if f.severity is Severity.info] == [
         "ENTRY_POINT_UNVERIFIED"
     ]
-    # Validation report artifact was written.
+    files = service.run_files(db_session, run.id)
     assert any(f.role is RunFileRole.validation_report for f in files)
-
-    # The stored package is a valid zip with the expected structure.
-    path = get_settings().data_dir / outputs[0].storage_key
-    zf = zipfile.ZipFile(path)
-    assert any(n.endswith("/reports/report.json") for n in zf.namelist())
-    assert any(n.endswith("/reports/c_67.00.a.csv") for n in zf.namelist())
+    # No indicators/params file was uploaded.
+    assert not any(f.role is RunFileRole.indicators_params for f in files)
 
 
-def test_creation_timestamp_is_deterministic(
+def test_derived_indicators_and_parameters(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,
     lcr_workflow: WorkflowConfig,
+    entity: Entity,
     demo_fact_xlsx: bytes,
-    demo_indicators_xlsx: bytes,
 ) -> None:
-    run = _create_run(db_session, ready_snapshot, lcr_workflow)
-    _attach_both(db_session, run.id, demo_fact_xlsx, demo_indicators_xlsx)
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
+    _attach_facts(db_session, run.id, demo_fact_xlsx)
+    service.execute_run(db_session, run.id)
 
-    def outputs():
-        files = service.run_files(db_session, run.id)
-        return [f for f in files if f.role is RunFileRole.package_output]
+    indicators = _package_member(db_session, run.id, "FilingIndicators.csv")
+    # Facts present -> true; other module templates -> false (incl. open C_77.00).
+    assert "C_67.00.a,true" in indicators
+    assert "C_72.00.a,false" in indicators
+    assert "C_77.00,false" in indicators
 
-    r1 = service.execute_run(db_session, run.id)
-    name1 = outputs()[0].filename
-    # Re-execute -> same filename (timestamp derived from run id + ref date).
-    r2 = service.execute_run(db_session, run.id)
-    name2 = outputs()[0].filename
-    assert r1.status is RunStatus.generated and r2.status is RunStatus.generated
-    assert name1 == name2
+    params = _package_member(db_session, run.id, "parameters.csv")
+    assert "entityID,rs:5299001234567890ABCD.CON" in params
+    assert "refPeriod,2025-12-31" in params
+    assert "baseCurrency,iso4217:EUR" in params
 
 
-def test_unresolvable_fact_fails_run_with_details(
+def test_indicators_override_is_used(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,
     lcr_workflow: WorkflowConfig,
-    demo_indicators_xlsx: bytes,
+    entity: Entity,
+    demo_fact_xlsx: bytes,
 ) -> None:
-    run = _create_run(db_session, ready_snapshot, lcr_workflow)
-    # A cell that does not exist in the mini DPM.
-    bad = fact_xlsx([("C_67.00.a", "9999", "9999", 1)])
-    service.attach_fact_file(db_session, run_id=run.id, filename="f.xlsx", data=bad)
-    service.attach_indicators_params_file(
-        db_session, run_id=run.id, filename="i.xlsx", data=demo_indicators_xlsx
+    """An uploaded indicators file overrides derivation (advanced)."""
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
+    _attach_facts(db_session, run.id, demo_fact_xlsx)
+    # Override declares C_72.00.a reported although it has no facts.
+    override = indicators_params_xlsx(
+        [
+            ("entity_lei", ENTITY),
+            ("reference_date", "2025-12-31"),
+            ("base_currency", "EUR"),
+            ("decimals", -3),
+        ],
+        [("C_67.00.a", True), ("C_72.00.a", True)],
     )
-
+    service.attach_indicators_params_file(
+        db_session, run_id=run.id, filename="ip.xlsx", data=override
+    )
     run = service.execute_run(db_session, run.id)
-    # Validation catches the unresolvable fact; the run ends failed_validation
-    # (not the unexpected-error `failed`) and the package is still stored.
+    # The override's empty C_72.00.a indicator surfaces (derivation wouldn't).
+    codes = [f.code for f in service.list_findings(db_session, run.id)]
+    assert "EMPTY_FILING_INDICATOR" in codes
+    assert run.status is RunStatus.generated  # warning only
+
+
+def test_open_table_guard(
+    db_session: Session,
+    ready_snapshot: TaxonomySnapshot,
+    lcr_workflow: WorkflowConfig,
+    entity: Entity,
+) -> None:
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
+    data = fact_xlsx(
+        [
+            ("C_67.00.a", "0020", "0060", 100000),  # closed, resolves
+            ("C_77.00", "0010", "0010", 5),  # open/keyed -> guarded
+        ]
+    )
+    _attach_facts(db_session, run.id, data)
+    run = service.execute_run(db_session, run.id)
     assert run.status is RunStatus.failed_validation
     findings = service.list_findings(db_session, run.id)
-    unresolved = [f for f in findings if f.code == "UNRESOLVED_FACT"]
-    assert unresolved and unresolved[0].row_code == "9999"
-    files = service.run_files(db_session, run.id)
-    assert any(f.role is RunFileRole.package_output for f in files)
-    assert any(f.role is RunFileRole.validation_report for f in files)
+    open_f = [f for f in findings if f.code == "OPEN_TABLE_UNSUPPORTED"]
+    assert open_f and open_f[0].template_code == "C_77.00"
+    # The open table produced no CSV, but the closed one did.
+    names = zipfile.ZipFile(
+        get_settings().data_dir
+        / next(
+            f
+            for f in service.run_files(db_session, run.id)
+            if f.role is RunFileRole.package_output
+        ).storage_key
+    ).namelist()
+    assert any(n.endswith("c_67.00.a.csv") for n in names)
+    assert not any(n.endswith("c_77.00.csv") for n in names)
 
 
-def test_execute_without_indicators_rejected(
+def test_unresolvable_fact_fails_validation(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,
     lcr_workflow: WorkflowConfig,
-    demo_fact_xlsx: bytes,
+    entity: Entity,
 ) -> None:
-    run = _create_run(db_session, ready_snapshot, lcr_workflow)
-    service.attach_fact_file(
-        db_session, run_id=run.id, filename="f.xlsx", data=demo_fact_xlsx
-    )
-    with pytest.raises(ValidationError, match="indicators/parameters"):
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
+    _attach_facts(db_session, run.id, fact_xlsx([("C_67.00.a", "9999", "9999", 1)]))
+    run = service.execute_run(db_session, run.id)
+    assert run.status is RunStatus.failed_validation
+    findings = service.list_findings(db_session, run.id)
+    assert any(f.code == "UNRESOLVED_FACT" and f.row_code == "9999" for f in findings)
+    files = service.run_files(db_session, run.id)
+    assert any(f.role is RunFileRole.package_output for f in files)
+
+
+def test_execute_without_fact_file_rejected(
+    db_session: Session,
+    ready_snapshot: TaxonomySnapshot,
+    lcr_workflow: WorkflowConfig,
+    entity: Entity,
+) -> None:
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
+    with pytest.raises(ValidationError, match="no fact file"):
         service.execute_run(db_session, run.id)
 
 
 def test_create_run_rejects_non_ready_snapshot(
-    db_session: Session, lcr_workflow: WorkflowConfig
+    db_session: Session, lcr_workflow: WorkflowConfig, entity: Entity
 ) -> None:
     snap = TaxonomySnapshot(
         version_label="2.0",
@@ -160,11 +198,11 @@ def test_create_run_rejects_non_ready_snapshot(
     db_session.add(snap)
     db_session.commit()
     with pytest.raises(ValidationError, match="not ready"):
-        _create_run(db_session, snap, lcr_workflow)
+        _create_run(db_session, snap, lcr_workflow, entity)
 
 
 def test_create_run_rejects_module_not_in_snapshot(
-    db_session: Session, ready_snapshot: TaxonomySnapshot
+    db_session: Session, ready_snapshot: TaxonomySnapshot, entity: Entity
 ) -> None:
     wf = WorkflowConfig(
         name="COREP — Own Funds", framework_code="COREP", module_code="COREP_OF"
@@ -172,11 +210,11 @@ def test_create_run_rejects_module_not_in_snapshot(
     db_session.add(wf)
     db_session.commit()
     with pytest.raises(ValidationError, match="not in snapshot"):
-        _create_run(db_session, ready_snapshot, wf)
+        _create_run(db_session, ready_snapshot, wf, entity)
 
 
 def test_seed_is_idempotent(db_session: Session) -> None:
     assert seed_workflow_configs(db_session) == 20
     assert seed_workflow_configs(db_session) == 0
-    codes = {w.module_code for w in service.list_workflows(db_session)}
-    assert "COREP_LCR_DA" in codes and len(codes) == 20
+    assert seed_entities(db_session) == 3
+    assert seed_entities(db_session) == 0

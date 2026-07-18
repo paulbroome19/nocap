@@ -21,6 +21,7 @@ def _run(facts, indicators, **over):
         facts=facts,
         resolve=resolver(_MAP),
         module_templates=_MODULE,
+        open_templates=set(),
         filing_indicators=indicators,
         fact_file_name="facts.xlsx",
         entity_id="5299001234567890ABCD",
@@ -100,6 +101,24 @@ def test_indicator_not_in_module() -> None:
     )
     bad = [f for f in findings if f.code == "INDICATOR_NOT_IN_MODULE"]
     assert bad and bad[0].template_code == "C_99.99"
+
+
+def test_open_table_unsupported() -> None:
+    facts = [
+        fact("C_77.00", "0010", "0010", "1"),
+        fact("C_77.00", "0020", "0010", "2", src_row=3),  # same template again
+        fact("C_73.00.a", "0010", "0010", "1000", src_row=4),
+    ]
+    findings = _run(
+        facts, [indicator("C_73.00.a")], open_templates={"C_77.00"}
+    )
+    open_findings = [f for f in findings if f.code == "OPEN_TABLE_UNSUPPORTED"]
+    # One finding per open template (deduped), with a clear message.
+    assert len(open_findings) == 1
+    assert open_findings[0].template_code == "C_77.00"
+    assert "not supported in v1" in open_findings[0].message
+    # The open-table facts are not also reported as unresolved.
+    assert not [f for f in findings if f.code == "UNRESOLVED_FACT"]
 
 
 def test_missing_parameters() -> None:
