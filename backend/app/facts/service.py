@@ -82,6 +82,54 @@ def store_run_file(
     return run_file
 
 
+def upsert_run_file(
+    db: Session,
+    *,
+    run_id: int,
+    role: RunFileRole,
+    filename: str,
+    data: bytes,
+    settings: Settings,
+) -> RunFile:
+    """Store a regenerated output, reusing the existing row for its role.
+
+    Used for outputs that are (re)written more than once for a run — e.g. the
+    validation report, rewritten after the formula-validation phase. Reusing the
+    row keeps the ``RunFile`` id **stable**, so a download link a client already
+    holds stays valid across phases (a delete+recreate would 404 the old id).
+    """
+    existing = db.scalar(
+        select(RunFile).where(
+            RunFile.run_id == run_id, RunFile.role == role
+        )
+    )
+    directory = _run_dir(settings, run_id) / role.value
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / filename
+    path.write_bytes(data)
+    storage_key = str(path.relative_to(settings.data_dir).as_posix())
+
+    if existing is None:
+        return store_run_file(
+            db, run_id=run_id, role=role, filename=filename, data=data,
+            settings=settings,
+        )
+    # If the filename changed, drop the now-orphaned old file.
+    old_path = settings.data_dir / existing.storage_key
+    if existing.storage_key != storage_key and old_path.exists():
+        old_path.unlink()
+    existing.filename = filename
+    existing.storage_key = storage_key
+    existing.checksum = compute_checksum(data)
+    db.flush()
+    return existing
+
+
+def run_file_present(settings: Settings, run_file: RunFile) -> bool:
+    """True if the run file's stored bytes exist at the configured storage root."""
+    return (settings.data_dir / run_file.storage_key).exists()
+
+
 def ingest_fact_file(
     db: Session,
     *,

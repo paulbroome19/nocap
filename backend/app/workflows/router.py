@@ -158,9 +158,18 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
     run = service.get_run(db, run_id)
     files = service.run_files(db, run_id)
     findings = service.list_findings(db, run_id)
+    settings = get_settings()
+
+    def _file_out(f) -> RunFileOut:
+        out = RunFileOut.model_validate(f)
+        # Reconcile with disk so a missing artifact is a clear state, not a 404
+        # on click (mirrors the snapshot artifact reconciliation).
+        out.available = service.run_file_available(settings, f)
+        return out
+
     return RunDetailOut(
         run=RunOut.model_validate(run),
-        files=[RunFileOut.model_validate(f) for f in files],
+        files=[_file_out(f) for f in files],
         findings=[FindingOut.model_validate(f) for f in findings],
     )
 

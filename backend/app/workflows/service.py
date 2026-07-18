@@ -20,7 +20,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
-from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.core.errors import (
+    ArtifactUnavailableError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from app.facts import service as facts
 from app.facts.models import RunFile, RunFileRole
 from app.facts.parsers import default_indicators_params_parser
@@ -555,17 +560,17 @@ def _write_validation_report(
     *,
     settings: Settings,
 ) -> None:
-    """(Re)write the validation report from all persisted findings for the run."""
+    """(Re)write the validation report from all persisted findings for the run.
+
+    Upserts the report in place (stable ``RunFile`` id) so a download link a
+    client already holds stays valid when the report is rewritten after the
+    formula-validation phase.
+    """
     findings = list_findings(db, run.id)  # ORM rows duck-type the Finding shape
     report = validation.build_report_text(
         header_lines=_report_header(run, wf, package_filename), findings=findings
     )
-    for rf in facts.list_run_files(db, run.id):
-        if rf.role is RunFileRole.validation_report:
-            (settings.data_dir / rf.storage_key).unlink(missing_ok=True)
-            db.delete(rf)
-    db.flush()
-    facts.store_run_file(
+    facts.upsert_run_file(
         db,
         run_id=run.id,
         role=RunFileRole.validation_report,
@@ -834,10 +839,16 @@ def get_run_file(db: Session, run_file_id: int) -> RunFile:
     return run_file
 
 
+def run_file_available(settings: Settings, run_file: RunFile) -> bool:
+    """Whether a run file's stored bytes are present at the storage root."""
+    return facts.run_file_present(settings, run_file)
+
+
 def read_run_file_path(settings: Settings, run_file: RunFile) -> Path:
     path = settings.data_dir / run_file.storage_key
     if not path.exists():
-        raise NotFoundError(
-            f"stored bytes for run file id={run_file.id} are missing"
+        raise ArtifactUnavailableError(
+            f"the stored {run_file.role.value} file ({run_file.filename}) is no "
+            "longer present at the storage root; re-run to regenerate it"
         )
     return path
