@@ -91,25 +91,32 @@ def findings_from_arelle_records(
     """Pure mapping: Arelle structured log records → formula-phase findings.
 
     Only assertion-result records (``message:v…``) become findings. Deactivated
-    rules are dropped. Duplicate rule ids (same rule firing per-fact) collapse to
-    one finding per rule id, keeping the first location.
+    rules are dropped. A rule firing on several facts collapses to one finding.
+
+    **Deterministic**: Arelle emits per-fact assertion messages in a
+    non-deterministic order, so we group all messages per rule id and pick the
+    lexicographically-smallest text (and sort by rule id) rather than keeping
+    "the first seen". Otherwise the same run yields different findings each time,
+    independent of any model caching.
     """
-    findings: list[Finding] = []
-    seen: set[str] = set()
+    by_rule: dict[str, list[tuple[str, str]]] = {}
     for record in records:
         m = _ASSERTION_CODE.match(str(record.get("code", "")))
         if m is None:
             continue
         rule_id = m.group(1)
-        if rule_id in deactivated_rules or rule_id in seen:
+        if rule_id in deactivated_rules:
             continue
-        seen.add(rule_id)
-        text = _message_text(record)
+        by_rule.setdefault(rule_id, []).append(
+            (str(record.get("level", "warning")), _message_text(record))
+        )
+
+    findings: list[Finding] = []
+    for rule_id in sorted(by_rule):
+        level, text = min(by_rule[rule_id], key=lambda e: e[1])
         findings.append(
             Finding(
-                severity=_LEVEL_TO_SEVERITY.get(
-                    record.get("level", "warning"), Severity.warning
-                ),
+                severity=_LEVEL_TO_SEVERITY.get(level, Severity.warning),
                 phase=ValidationPhase.formula,
                 code=rule_id,
                 message=text or f"assertion {rule_id} not satisfied",
@@ -178,16 +185,20 @@ def rule_results_from_records(
         agg[0] += int(sat)
         agg[1] += int(notsat)
 
-    # Unsatisfied messages (evaluated values) per rule id.
+    # Unsatisfied messages (evaluated values) per rule id. Deterministic: keep
+    # the lexicographically-smallest message, not the first-seen (Arelle's
+    # per-fact message order is non-deterministic).
     messages: dict[str, str] = {}
     for record in records:
         m = _ASSERTION_CODE.match(str(record.get("code", "")))
         if m is None:
             continue
         rule_id = m.group(1)
-        if rule_id in deactivated_rules or rule_id in messages:
+        if rule_id in deactivated_rules:
             continue
-        messages[rule_id] = _message_text(record)
+        text = _message_text(record)
+        if rule_id not in messages or text < messages[rule_id]:
+            messages[rule_id] = text
 
     results: list[RuleResult] = []
     for rule_id, (sat, notsat, atype) in counts.items():
@@ -366,11 +377,9 @@ class ArelleFormulaValidator:
             unknown_property_groups=unknown_pg,
         )
 
-    def _run_arelle(
-        self, package_path: Path, taxonomy_packages: list[Path]
-    ) -> list[dict]:
-        from arelle import CntlrCmdLine  # lazy: optional dependency
-
+    def _arelle_args(
+        self, package_path: Path, packages: list[Path]
+    ) -> list[str]:
         args: list[str] = [
             "--file", str(package_path),
             "--reportPackage",
@@ -383,10 +392,20 @@ class ArelleFormulaValidator:
             "--internetConnectivity", "offline",
             "--logFile", "logToBuffer",
         ]
-        packages = expand_taxonomy_packages(taxonomy_packages, self._cache_dir)
         for pkg in [*packages, eurofiling_package(self._cache_dir)]:
             args += ["--packages", str(pkg)]
-        cntlr = CntlrCmdLine.parseAndRun(args)
+        return args
+
+    def _run_arelle(
+        self, package_path: Path, taxonomy_packages: list[Path]
+    ) -> list[dict]:
+        # A fresh controller per run: reusing a warm controller neither speeds
+        # anything up (Arelle re-parses the DTS every load) nor preserves
+        # findings identity (see docs/formula-cache-findings.md).
+        from arelle import CntlrCmdLine  # lazy: optional dependency
+
+        packages = expand_taxonomy_packages(taxonomy_packages, self._cache_dir)
+        cntlr = CntlrCmdLine.parseAndRun(self._arelle_args(package_path, packages))
         try:
             data = json.loads(cntlr.logHandler.getJson())
             return data.get("log", [])

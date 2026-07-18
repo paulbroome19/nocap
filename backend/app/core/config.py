@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # Arelle EBA formula validation (v2). Feature flag to disable entirely; the
     # per-snapshot taxonomy package(s) live in the snapshot's artifact slot.
     arelle_enabled: bool = True
+    # NB: an in-process persistent taxonomy-model cache was investigated and
+    # deliberately NOT shipped — a reused Arelle controller is neither faster
+    # (the DTS is re-parsed every load) nor reproducible (findings differ across
+    # runs). See docs/formula-cache-findings.md for the evidence + the
+    # out-of-process path that would be required.
 
     @property
     def snapshots_dir(self) -> Path:
