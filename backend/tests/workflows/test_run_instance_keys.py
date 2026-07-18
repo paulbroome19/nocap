@@ -99,12 +99,12 @@ def test_run_detail_traceability(
     entity: Entity,
     demo_fact_xlsx: bytes,  # 2 facts, both C_67.00.a
 ) -> None:
-    # Declare C_72.00.a filed-true (no facts) so we can see a "declared" source.
+    # Declare C_72.00.a required (no facts) so we can see a "declared" source.
     service.upsert_entity_workflow_config(
         db_session,
         entity_id=entity.id,
         workflow_id=lcr_workflow.id,
-        indicator_declarations={"C_72.00.a": "true"},
+        indicator_declarations={"C_72.00.a": "required"},
         base_currency=None,
         decimals=None,
     )

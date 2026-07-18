@@ -1,4 +1,4 @@
-"""Per-(entity, workflow) config: Auto/True/False declarations + param overrides."""
+"""Per-(entity, workflow) config: Optional/Required/Not-required + param overrides."""
 
 from __future__ import annotations
 
@@ -51,50 +51,54 @@ def _package_names(db, run_id) -> list[str]:
 
 def test_resolve_declaration_three_states() -> None:
     closed = {"C_67.00.a"}
-    # Auto: reported iff facts.
+    # Optional: reported iff facts.
     assert service._resolve_declaration("C_67.00.a", {}, closed) is True
     assert service._resolve_declaration("C_72.00.a", {}, closed) is False
-    # True: forced positive even without facts.
+    # Required: forced positive even without facts.
     assert (
-        service._resolve_declaration("C_72.00.a", {"C_72.00.a": "true"}, closed)
+        service._resolve_declaration(
+            "C_72.00.a", {"C_72.00.a": "required"}, closed
+        )
         is True
     )
-    # False: forced negative even with facts.
+    # Not required: forced negative even with facts.
     assert (
-        service._resolve_declaration("C_67.00.a", {"C_67.00.a": "false"}, closed)
+        service._resolve_declaration(
+            "C_67.00.a", {"C_67.00.a": "not_required"}, closed
+        )
         is False
     )
 
 
-def test_clean_declarations_normalises_and_drops_auto() -> None:
+def test_clean_declarations_normalises_and_drops_optional() -> None:
     cleaned = service._clean_declarations(
         {
-            "C 67.00.a": "true",  # EBA display form -> canonical
-            "C_72.00.a": "auto",  # dropped (Auto is the default)
-            "C_73.00.a": "false",
-            "junk": "true",  # unparseable code -> dropped
+            "C 67.00.a": "required",  # EBA display form -> canonical
+            "C_72.00.a": "optional",  # dropped (Optional is the default)
+            "C_73.00.a": "not_required",
+            "junk": "required",  # unparseable code -> dropped
             "C_74.00.a": "maybe",  # invalid value -> dropped
         }
     )
     # Declarations are stored at template level (table variants collapsed).
-    assert cleaned == {"C_67.00": "true", "C_73.00": "false"}
+    assert cleaned == {"C_67.00": "required", "C_73.00": "not_required"}
 
 
 # --- end-to-end through execute_run ---------------------------------------
 
 
-def test_true_forces_positive_indicator(
+def test_required_with_facts_reports_positive(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,
     lcr_workflow: WorkflowConfig,
     entity: Entity,
-    demo_fact_xlsx: bytes,
+    demo_fact_xlsx: bytes,  # facts for C_67.00.a
 ) -> None:
     service.upsert_entity_workflow_config(
         db_session,
         entity_id=entity.id,
         workflow_id=lcr_workflow.id,
-        indicator_declarations={"C_72.00.a": "true"},  # no facts for it
+        indicator_declarations={"C_67.00.a": "required"},  # has facts
         base_currency=None,
         decimals=None,
     )
@@ -104,14 +108,50 @@ def test_true_forces_positive_indicator(
     )
     run = service.execute_run(db_session, run.id)
 
-    assert "C_72.00,true" in _indicators(db_session, run.id)
+    assert "C_67.00,true" in _indicators(db_session, run.id)
     codes = [f.code for f in service.list_findings(db_session, run.id)]
-    # Reported but no facts -> warning, not an error; run still generated.
-    assert "EMPTY_FILING_INDICATOR" in codes
+    assert "REQUIRED_TEMPLATE_EMPTY" not in codes
     assert run.status is RunStatus.generated, run.error
 
 
-def test_false_declares_not_filed_and_excludes_facts(
+def test_required_with_no_facts_fails_the_run(
+    db_session: Session,
+    ready_snapshot: TaxonomySnapshot,
+    lcr_workflow: WorkflowConfig,
+    entity: Entity,
+    demo_fact_xlsx: bytes,
+) -> None:
+    # C_72.00 has no facts in the demo file; declaring it Required must fail.
+    service.upsert_entity_workflow_config(
+        db_session,
+        entity_id=entity.id,
+        workflow_id=lcr_workflow.id,
+        indicator_declarations={"C_72.00.a": "required"},
+        base_currency=None,
+        decimals=None,
+    )
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
+    service.attach_fact_file(
+        db_session, run_id=run.id, filename="f.xlsx", data=demo_fact_xlsx
+    )
+    run = service.execute_run(db_session, run.id)
+
+    findings = service.list_findings(db_session, run.id)
+    required_empty = [f for f in findings if f.code == "REQUIRED_TEMPLATE_EMPTY"]
+    assert len(required_empty) == 1
+    assert required_empty[0].severity is Severity.error
+    assert required_empty[0].template_code == "C_72.00"
+    # The now-redundant empty-indicator warning is suppressed for it.
+    assert not any(
+        f.code == "EMPTY_FILING_INDICATOR" and f.template_code == "C_72.00"
+        for f in findings
+    )
+    # Still forced positive in the indicators; the run fails validation.
+    assert "C_72.00,true" in _indicators(db_session, run.id)
+    assert run.status is RunStatus.failed_validation, run.error
+
+
+def test_not_required_declares_not_filed_and_excludes_facts(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,
     lcr_workflow: WorkflowConfig,
@@ -122,7 +162,7 @@ def test_false_declares_not_filed_and_excludes_facts(
         db_session,
         entity_id=entity.id,
         workflow_id=lcr_workflow.id,
-        indicator_declarations={"C_67.00.a": "false"},
+        indicator_declarations={"C_67.00.a": "not_required"},
         base_currency=None,
         decimals=None,
     )
@@ -142,21 +182,21 @@ def test_false_declares_not_filed_and_excludes_facts(
     assert len(not_filed) == 1
     assert not_filed[0].severity is Severity.warning
     assert not_filed[0].message == (
-        "template C_67.00 declared not-filed; 2 facts excluded"
+        "template C_67.00 declared not required; 2 facts excluded"
     )
     # No missing-indicator error even though facts existed for the template.
     assert not any(f.code == "MISSING_FILING_INDICATOR" for f in findings)
     assert run.status is RunStatus.generated, run.error
 
 
-def test_auto_is_unchanged_default(
+def test_optional_is_unchanged_default(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,
     lcr_workflow: WorkflowConfig,
     entity: Entity,
     demo_fact_xlsx: bytes,
 ) -> None:
-    # An empty config = every template Auto = the pre-config behaviour.
+    # An empty config = every template Optional = the pre-config behaviour.
     service.upsert_entity_workflow_config(
         db_session,
         entity_id=entity.id,
@@ -207,7 +247,7 @@ def test_param_overrides_seed_run_defaults(
 
 def test_config_get_update_roundtrip(client, db_session, entity, lcr_workflow) -> None:
     url = f"/api/workflows/entities/{entity.id}/configs/{lcr_workflow.id}"
-    # Unset config returns the Auto default (empty map).
+    # Unset config returns the Optional default (empty map).
     got = client.get(url)
     assert got.status_code == 200
     assert got.json()["indicator_declarations"] == {}
@@ -215,15 +255,18 @@ def test_config_get_update_roundtrip(client, db_session, entity, lcr_workflow) -
     put = client.put(
         url,
         json={
-            "indicator_declarations": {"C 67.00.a": "false", "C_72.00.a": "auto"},
+            "indicator_declarations": {
+                "C 67.00.a": "not_required",
+                "C_72.00.a": "optional",
+            },
             "base_currency": "usd",
             "decimals": -2,
         },
     )
     assert put.status_code == 200
     body = put.json()
-    # Canonicalised + Auto dropped.
-    assert body["indicator_declarations"] == {"C_67.00": "false"}
+    # Canonicalised + Optional dropped.
+    assert body["indicator_declarations"] == {"C_67.00": "not_required"}
     assert body["base_currency"] == "USD"
     assert body["decimals"] == -2
 

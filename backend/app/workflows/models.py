@@ -103,10 +103,11 @@ class EntityWorkflowConfig(Base):
     Reference data that shapes how a workflow reports for a specific entity:
 
     - ``indicator_declarations`` — a template-code → declaration map. A
-      declaration is ``"auto"`` (default; report iff facts exist), ``"true"``
-      (force a positive filing indicator even with no facts), or ``"false"``
-      (declare not-filed: force a negative indicator and exclude any facts for
-      that template from the package). Templates absent from the map are Auto.
+      declaration is ``"optional"`` (default; report iff facts exist),
+      ``"required"`` (force a positive filing indicator; the run fails if the
+      template has no facts), or ``"not_required"`` (declare not-filed: force a
+      negative indicator and exclude any facts for that template from the
+      package). Templates absent from the map are Optional.
     - ``base_currency`` / ``decimals`` — parameter overrides used as the defaults
       when a run is created for this entity + workflow (blank ⇒ EUR / -3).
 

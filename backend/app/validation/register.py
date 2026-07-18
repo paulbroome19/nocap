@@ -96,9 +96,17 @@ STRUCTURAL_CHECKS: tuple[StructuralCheck, ...] = (
     ),
     StructuralCheck(
         "TEMPLATE_DECLARED_NOT_FILED", "NC-S05",
-        "Not-filed declarations exclude the template's facts",
-        "A template was declared not filed, so any facts supplied for it were "
+        "Not-required declarations exclude the template's facts",
+        "A template was declared not required, so any facts supplied for it were "
         "excluded from the package. Surfaced so the exclusion is never silent.",
+        "Templates",
+    ),
+    StructuralCheck(
+        "REQUIRED_TEMPLATE_EMPTY", "NC-S16",
+        "Templates declared required are filed",
+        "A template was declared required for this entity and workflow, so it "
+        "must carry data. A required template with no facts fails the run — "
+        "either report its data or change it to optional or not required.",
         "Templates",
     ),
     StructuralCheck(

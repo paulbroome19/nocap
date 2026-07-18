@@ -40,6 +40,9 @@ def test_validator_error_and_meta_codes_registered() -> None:
     # Emitted outside the validation package but still render in the register.
     assert "VALIDATOR_ERROR" in CHECK_BY_CODE
     assert "FORMULA_VALIDATION_UNAVAILABLE" in CHECK_BY_CODE
+    # Filing-indicator checks emitted by the workflows stage.
+    assert "TEMPLATE_DECLARED_NOT_FILED" in CHECK_BY_CODE
+    assert "REQUIRED_TEMPLATE_EMPTY" in CHECK_BY_CODE
 
 
 def test_every_registry_entry_is_well_formed() -> None:

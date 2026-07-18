@@ -133,11 +133,16 @@ def validate_facts(
     entity_id: str | None,
     ref_period: date | None,
     template_of: Callable[[str], str] = lambda code: code,
+    required_empty: set[str] = frozenset(),
 ) -> list[Finding]:
     """``template_of`` collapses a table code to its filing-indicator template
     code (``C_73.00.a`` → ``C_73.00``); the filing-indicator consistency checks
     run at template level, since indicators are per-template. Facts stay
-    per-table for resolution and locations."""
+    per-table for resolution and locations.
+
+    ``required_empty`` are templates already reported (by the caller) as
+    Required-but-empty errors; they are skipped by the empty-indicator warning
+    so the same template isn't flagged twice."""
     findings: list[Finding] = []
 
     def _loc(fact: FactLike) -> dict:
@@ -222,7 +227,7 @@ def validate_facts(
                 template_code=template,
             )
         )
-    for template in sorted(positive - templates_with_facts):
+    for template in sorted(positive - templates_with_facts - required_empty):
         findings.append(
             Finding(
                 severity=Severity.warning,
