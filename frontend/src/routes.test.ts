@@ -24,6 +24,8 @@ describe('route table', () => {
     ['/reporting/runs/13/validation', 'validation'],
     ['/reporting/runs/13/package', 'package'],
     ['/releases', 'releases'],
+    ['/releases/regulators/2', 'releases/regulators/:regulatorId'],
+    ['/releases/regulators/2/new', 'releases/regulators/:regulatorId/new'],
     ['/releases/1', 'releases/:snapshotId'],
     ['/reference', 'reference'],
     ['/reference/entities/2', 'reference/entities/:entityId'],

@@ -10,7 +10,9 @@ import RunInput from './pages/run/RunInput.tsx'
 import RunIndicators from './pages/run/RunIndicators.tsx'
 import RunValidation from './pages/run/RunValidation.tsx'
 import RunPackage from './pages/run/RunPackage.tsx'
-import Releases from './pages/Releases.tsx'
+import Regulators from './pages/Regulators.tsx'
+import RegulatorReleases from './pages/RegulatorReleases.tsx'
+import ReleaseWizard from './pages/ReleaseWizard.tsx'
 import ReleaseDetail from './pages/ReleaseDetail.tsx'
 import ReferenceData from './pages/ReferenceData.tsx'
 import EntityDetail from './pages/EntityDetail.tsx'
@@ -46,8 +48,11 @@ export const routes: RouteObject[] = [
         ],
       },
 
-      // Taxonomy Releases.
-      { path: 'releases', element: <Releases /> },
+      // Taxonomies — regulator (publisher) → its releases → release detail.
+      { path: 'releases', element: <Regulators /> },
+      { path: 'releases/regulators/:regulatorId', element: <RegulatorReleases /> },
+      { path: 'releases/regulators/:regulatorId/new', element: <ReleaseWizard /> },
+      // Static "regulators" segment outranks this dynamic release id.
       { path: 'releases/:snapshotId', element: <ReleaseDetail /> },
 
       // Reference Data.

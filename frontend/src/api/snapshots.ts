@@ -6,15 +6,26 @@ export type SnapshotStatus =
   | 'failed'
   | 'artifacts_missing'
 
+export interface Regulator {
+  id: number
+  code: string
+  name: string
+}
+
 export interface Snapshot {
   id: number
+  regulator_id: number
+  regulator_code: string
+  regulator_name: string
+  // Business name, e.g. "EBA Taxonomy 4.2".
+  display_name: string
   version_label: string
   original_filename: string
   checksum: string
   status: SnapshotStatus
   error: string | null
   uploaded_at: string
-  // Present on registry list / detail responses; drives the run-picker badge.
+  // Backend integrity only; not rendered as a UI panel.
   capabilities?: Capabilities | null
 }
 
@@ -80,10 +91,34 @@ export async function listSnapshots(): Promise<Snapshot[]> {
   return res.json()
 }
 
+export async function listRegulators(): Promise<Regulator[]> {
+  const res = await fetch('/api/taxonomy/regulators')
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export async function getRegulator(id: number): Promise<Regulator> {
+  const res = await fetch(`/api/taxonomy/regulators/${id}`)
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+export async function listRegulatorReleases(id: number): Promise<Snapshot[]> {
+  const res = await fetch(`/api/taxonomy/regulators/${id}/releases`)
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
 export async function getSnapshot(id: number): Promise<Snapshot> {
   const res = await fetch(`/api/taxonomy/snapshots/${id}`)
   if (!res.ok) throw new Error(await parseError(res))
   return res.json()
+}
+
+/** Delete a release (blocked by the server if any run references it). */
+export async function deleteRelease(id: number): Promise<void> {
+  const res = await fetch(`/api/taxonomy/snapshots/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await parseError(res))
 }
 
 /** Rebuild the converted DB from the stored original — no re-upload. */
@@ -136,23 +171,34 @@ export function uploadArtifact(
   })
 }
 
+export interface CreateReleaseFiles {
+  dpm: File
+  taxonomy: File
+  rules: File
+}
+
 /**
- * Upload a DPM release. Uses XMLHttpRequest so we can report upload progress
- * (fetch has no upload-progress events). `onProgress` gets 0..1.
+ * Create a release from its three mandatory artifacts — all or nothing. The
+ * server verifies each before persisting anything; a rejection surfaces its
+ * plain-language reason. XHR is used so the (large) upload reports progress.
+ * `onProgress` gets 0..1.
  */
-export function uploadSnapshot(
-  file: File,
+export function createRelease(
+  regulatorId: number,
   versionLabel: string,
+  files: CreateReleaseFiles,
   onProgress?: (fraction: number) => void,
 ): Promise<Snapshot> {
   return new Promise((resolve, reject) => {
     const form = new FormData()
     form.append('version_label', versionLabel)
-    form.append('file', file)
+    form.append('regulator_id', String(regulatorId))
+    form.append('dpm_file', files.dpm)
+    form.append('taxonomy_file', files.taxonomy)
+    form.append('rules_file', files.rules)
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', '/api/taxonomy/snapshots')
-
+    xhr.open('POST', '/api/taxonomy/releases')
     xhr.upload.onprogress = (e) => {
       if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
     }
