@@ -32,6 +32,27 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
 
+class Regulator(Base):
+    """A taxonomy publisher — the body that issues the DPM / taxonomy releases we
+    ingest (e.g. the EBA).
+
+    Design note: a regulator here is the *publisher* of a taxonomy, NOT a
+    submission destination. Where a completed package is ultimately filed (a
+    national competent authority, a specific portal) is a separate, future
+    concept and must never be conflated with the publisher modelled here.
+    """
+
+    __tablename__ = "regulator"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Short stable code, e.g. "EBA".
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SnapshotStatus(enum.StrEnum):
     """Lifecycle of a snapshot's ingestion.
 
@@ -51,6 +72,11 @@ class TaxonomySnapshot(Base):
     __tablename__ = "taxonomy_snapshot"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+
+    # The publisher of this release (e.g. EBA). Every release belongs to one.
+    regulator_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("regulator.id"), index=True
+    )
 
     # Human label for the release, e.g. the DPM framework version "4.2".
     version_label: Mapped[str] = mapped_column(String(255))

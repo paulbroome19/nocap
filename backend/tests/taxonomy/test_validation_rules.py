@@ -23,7 +23,10 @@ from tests.fixtures import validation_rules_mini as fx
 
 @pytest.fixture
 def ready_release(db_session: Session) -> TaxonomySnapshot:
+    from app.taxonomy.seed import eba
+
     snap = TaxonomySnapshot(
+        regulator_id=eba(db_session).id,
         version_label="4.2",
         original_filename="dpm.accdb",
         checksum="rulescheck",

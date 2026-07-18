@@ -273,15 +273,22 @@ def register_snapshot(
     file_bytes: bytes,
     filename: str,
     version_label: str,
+    regulator_id: int | None = None,
     settings: Settings | None = None,
 ) -> TaxonomySnapshot:
     """Persist a new snapshot (status=ingesting) and store the uploaded file.
 
-    Rejects a re-upload of identical bytes (duplicate checksum).
+    Rejects a re-upload of identical bytes (duplicate checksum). ``regulator_id``
+    defaults to the EBA — the platform's default taxonomy publisher.
     """
     settings = settings or get_settings()
     if not file_bytes:
         raise ValidationError("uploaded file is empty")
+
+    if regulator_id is None:
+        from app.taxonomy.seed import eba
+
+        regulator_id = eba(db).id
 
     checksum = compute_checksum(file_bytes)
     existing = db.scalar(
@@ -293,6 +300,7 @@ def register_snapshot(
         )
 
     snapshot = TaxonomySnapshot(
+        regulator_id=regulator_id,
         version_label=version_label,
         original_filename=filename,
         checksum=checksum,

@@ -18,7 +18,10 @@ from app.taxonomy.models import (
 
 @pytest.fixture
 def release_42(db_session: Session) -> TaxonomySnapshot:
+    from app.taxonomy.seed import eba
+
     snap = TaxonomySnapshot(
+        regulator_id=eba(db_session).id,
         version_label="4.2",
         original_filename="dpm.accdb",
         checksum="coh42",
