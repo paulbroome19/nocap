@@ -94,19 +94,22 @@ export interface FilingIndicatorOutcome {
   source: 'declared' | 'auto'
 }
 
-export interface CheckResult {
-  key: string
-  label: string
-  status: 'pass' | 'warning' | 'fail' | 'note'
-  errors: number
-  warnings: number
-  infos: number
+export interface RegisterRow {
+  id: string
+  rule: string
+  source: 'structural' | 'formula'
+  template: string | null
+  data_evaluated: string
+  result: 'PASSED' | 'FAILED' | 'WARNING' | 'NOTE'
+  detail: string
 }
 
 export interface FormulaSummary {
   status: 'executed' | 'unavailable' | 'not_run'
+  loaded?: number
+  evaluated?: number
+  satisfied?: number
   unsatisfied: number
-  unsatisfied_rule_ids: string[]
   deactivated: string[]
   note: string | null
 }
@@ -158,7 +161,7 @@ export interface RunDetail {
   findings: Finding[]
   fact_count: number
   filing_indicators: FilingIndicatorOutcome[] | null
-  structural_checks: CheckResult[]
+  rule_register: RegisterRow[]
   formula_summary: FormulaSummary | null
 }
 
