@@ -76,7 +76,8 @@ def test_clean_declarations_normalises_and_drops_auto() -> None:
             "C_74.00.a": "maybe",  # invalid value -> dropped
         }
     )
-    assert cleaned == {"C_67.00.a": "true", "C_73.00.a": "false"}
+    # Declarations are stored at template level (table variants collapsed).
+    assert cleaned == {"C_67.00": "true", "C_73.00": "false"}
 
 
 # --- end-to-end through execute_run ---------------------------------------
@@ -103,7 +104,7 @@ def test_true_forces_positive_indicator(
     )
     run = service.execute_run(db_session, run.id)
 
-    assert "C_72.00.a,true" in _indicators(db_session, run.id)
+    assert "C_72.00,true" in _indicators(db_session, run.id)
     codes = [f.code for f in service.list_findings(db_session, run.id)]
     # Reported but no facts -> warning, not an error; run still generated.
     assert "EMPTY_FILING_INDICATOR" in codes
@@ -132,7 +133,7 @@ def test_false_declares_not_filed_and_excludes_facts(
     run = service.execute_run(db_session, run.id)
 
     # Indicator forced negative; the excluded template produces no CSV.
-    assert "C_67.00.a,false" in _indicators(db_session, run.id)
+    assert "C_67.00,false" in _indicators(db_session, run.id)
     names = _package_names(db_session, run.id)
     assert not any(n.endswith("c_67.00.a.csv") for n in names)
 
@@ -141,7 +142,7 @@ def test_false_declares_not_filed_and_excludes_facts(
     assert len(not_filed) == 1
     assert not_filed[0].severity is Severity.warning
     assert not_filed[0].message == (
-        "template C_67.00.a declared not-filed; 2 facts excluded"
+        "template C_67.00 declared not-filed; 2 facts excluded"
     )
     # No missing-indicator error even though facts existed for the template.
     assert not any(f.code == "MISSING_FILING_INDICATOR" for f in findings)
@@ -170,8 +171,8 @@ def test_auto_is_unchanged_default(
     )
     run = service.execute_run(db_session, run.id)
     indicators = _indicators(db_session, run.id)
-    assert "C_67.00.a,true" in indicators  # has facts
-    assert "C_72.00.a,false" in indicators  # no facts
+    assert "C_67.00,true" in indicators  # has facts
+    assert "C_72.00,false" in indicators  # no facts
     assert run.status is RunStatus.generated, run.error
 
 
@@ -222,7 +223,7 @@ def test_config_get_update_roundtrip(client, db_session, entity, lcr_workflow) -
     assert put.status_code == 200
     body = put.json()
     # Canonicalised + Auto dropped.
-    assert body["indicator_declarations"] == {"C_67.00.a": "false"}
+    assert body["indicator_declarations"] == {"C_67.00": "false"}
     assert body["base_currency"] == "USD"
     assert body["decimals"] == -2
 

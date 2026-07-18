@@ -124,10 +124,10 @@ def test_run_detail_traceability(
     assert detail["fact_count"] == 2
 
     fis = {f["template_code"]: f for f in detail["filing_indicators"]}
-    assert fis["C_72.00.a"]["reported"] is True
-    assert fis["C_72.00.a"]["source"] == "declared"
-    assert fis["C_67.00.a"]["reported"] is True  # has facts
-    assert fis["C_67.00.a"]["source"] == "auto"
+    assert fis["C_72.00"]["reported"] is True
+    assert fis["C_72.00"]["source"] == "declared"
+    assert fis["C_67.00"]["reported"] is True  # has facts
+    assert fis["C_67.00"]["source"] == "auto"
 
     pkg = next(f for f in detail["files"] if f["role"] == "package_output")
     assert pkg["size_bytes"] and pkg["size_bytes"] > 0

@@ -132,7 +132,12 @@ def validate_facts(
     fact_file_name: str,
     entity_id: str | None,
     ref_period: date | None,
+    template_of: Callable[[str], str] = lambda code: code,
 ) -> list[Finding]:
+    """``template_of`` collapses a table code to its filing-indicator template
+    code (``C_73.00.a`` → ``C_73.00``); the filing-indicator consistency checks
+    run at template level, since indicators are per-template. Facts stay
+    per-table for resolution and locations."""
     findings: list[Finding] = []
 
     def _loc(fact: FactLike) -> dict:
@@ -178,7 +183,7 @@ def validate_facts(
                 )
             )
             continue
-        templates_with_facts.add(fact.template_code)
+        templates_with_facts.add(template_of(fact.template_code))
         by_datapoint[res.datapoint_id].append(fact)
         for severity, code, message in _value_findings(res.datatype_code, fact.value):
             findings.append(
@@ -228,8 +233,9 @@ def validate_facts(
                 template_code=template,
             )
         )
+    module_template_ids = {template_of(t) for t in module_templates}
     for template in sorted(
-        {i.template_code for i in indicators} - module_templates
+        {i.template_code for i in indicators} - module_template_ids
     ):
         findings.append(
             Finding(
