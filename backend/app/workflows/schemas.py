@@ -126,6 +126,8 @@ class RunOut(BaseModel):
     status: RunStatus
     error: str | None
     failure_details: list | None
+    # The release capability set captured when the run was created.
+    capabilities: dict | None
     created_at: datetime
 
 
@@ -145,8 +147,9 @@ class RegisterRowOut(BaseModel):
     source: str  # structural | formula
     template: str | None
     data_evaluated: str
-    result: str  # PASSED | FAILED | WARNING | NOTE
+    result: str  # PASSED | FAILED | WARNING | NOTE | DEACTIVATED
     detail: str
+    rule_text: str | None = None
 
 
 class FactRowOut(BaseModel):

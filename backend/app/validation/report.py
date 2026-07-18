@@ -19,6 +19,7 @@ _RESULT_CLASS = {
     "FAILED": "fail",
     "WARNING": "warn",
     "NOTE": "note",
+    "DEACTIVATED": "note",
 }
 
 
@@ -33,7 +34,13 @@ def _register_rows(register: Sequence[RegisterRow]) -> str:
             f"<td>{escape(r.source)}</td>"
             f"<td class=mono>{escape(r.data_evaluated)}</td>"
             f'<td class="result {cls}">{escape(r.result)}</td>'
-            f"<td>{escape(r.detail)}</td>"
+            f"<td>{escape(r.detail)}"
+            + (
+                f'<div class="muted">{escape(r.rule_text)}</div>'
+                if r.rule_text
+                else ""
+            )
+            + "</td>"
             "</tr>"
         )
     return "\n".join(rows)

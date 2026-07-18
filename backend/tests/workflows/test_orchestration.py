@@ -31,6 +31,24 @@ def _create_run(db, snapshot, workflow, entity, **over):
     return service.create_run(db, **kw)
 
 
+def test_create_run_records_capability_set(
+    db_session: Session,
+    ready_snapshot: TaxonomySnapshot,
+    lcr_workflow: WorkflowConfig,
+    entity: Entity,
+) -> None:
+    # The mini fixture release has only the DPM ready → resolve + generate,
+    # captured onto the run for reproducibility.
+    run = _create_run(db_session, ready_snapshot, lcr_workflow, entity)
+    assert run.capabilities == {
+        "resolve": True,
+        "generate": True,
+        "verified_entry_points": False,
+        "formula_validate": False,
+        "rule_register": False,
+    }
+
+
 def _attach_facts(db, run_id, data):
     service.attach_fact_file(db, run_id=run_id, filename="facts.xlsx", data=data)
 

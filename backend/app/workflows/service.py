@@ -41,6 +41,9 @@ from app.generation.schemas import (
     FilingIndicatorSpec,
     PackageMetadata,
 )
+from app.taxonomy import artifacts as taxonomy_artifacts
+from app.taxonomy import capabilities as taxonomy_caps
+from app.taxonomy import rules as taxonomy_rules
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
 from app.taxonomy.service import normalize_template_code, template_of
@@ -382,6 +385,12 @@ def create_run(
                 f"at release {rid}"
             )
 
+    # Capture the release's capability set at execution binding (reproducibility;
+    # capabilities are otherwise derived on read).
+    caps = taxonomy_caps.derive_capabilities(
+        taxonomy_artifacts.list_slots(db, snapshot, settings=settings)
+    )
+
     run = Run(
         workflow_id=wf.id,
         snapshot_id=snapshot.id,
@@ -397,6 +406,7 @@ def create_run(
         base_currency=currency,
         decimals=decimals if decimals is not None else -3,
         status=RunStatus.created,
+        capabilities=caps.to_dict(),
     )
     db.add(run)
     db.commit()
@@ -673,6 +683,35 @@ def _append_findings(db: Session, run_id: int, findings: list[Finding]) -> None:
     db.commit()
 
 
+def _register_rule_meta(db: Session, run: Run) -> dict | None:
+    """Workbook facts for the run's register, resolved for its reporting date.
+
+    ``{"descriptions": {...}, "inactive": {...}}`` from the release's ingested
+    validation rules, or ``None`` when no workbook is ingested. Never raises —
+    the register renders without it.
+    """
+    try:
+        if not taxonomy_rules.has_ingested_rules(db, run.snapshot_id):
+            return None
+        view = taxonomy_rules.build_register_view(
+            db, run.snapshot_id, run.reference_date
+        )
+        return {"descriptions": view.descriptions, "inactive": view.inactive}
+    except Exception:  # noqa: BLE001 — the register must render regardless
+        logger.exception(
+            "run id=%s: could not load validation-rules register meta", run.id,
+            extra={"run_id": run.id},
+        )
+        return None
+
+
+def build_run_register(db: Session, run: Run, findings: list) -> list:
+    """The run's rule register, with workbook descriptions joined in."""
+    return validation_register.build_register(
+        findings, run.formula_summary, rule_meta=_register_rule_meta(db, run)
+    )
+
+
 def _write_validation_report(
     db: Session,
     run: Run,
@@ -690,7 +729,7 @@ def _write_validation_report(
     findings = list_findings(db, run.id)  # ORM rows duck-type the Finding shape
     report = validation_report.build_report_html(
         identity=_report_identity(db, run, wf, package_filename),
-        register=validation_register.build_register(findings, run.formula_summary),
+        register=build_run_register(db, run, findings),
         formula=run.formula_summary,
     )
     facts.upsert_run_file(
@@ -1003,7 +1042,24 @@ def run_formula_validation_task(run_id: int) -> None:
             "run id=%s formula validation started", run.id,
             extra={"run_id": run.id},
         )
-        validator = ArelleFormulaValidator(cache_dir=settings.data_dir / "cache")
+        # Deactivation is driven by the ingested workbook (IsActive + reference-
+        # date window) when present, replacing the hardcoded EBA two-rule list;
+        # fall back to that list (deactivated_rules=None) when no workbook.
+        deactivated: set[str] | None = None
+        try:
+            if taxonomy_rules.has_ingested_rules(db, run.snapshot_id):
+                deactivated = taxonomy_rules.build_register_view(
+                    db, run.snapshot_id, run.reference_date
+                ).deactivated_codes
+        except Exception:  # noqa: BLE001 — fall back to the default list
+            logger.exception(
+                "run id=%s: workbook deactivation load failed", run.id,
+                extra={"run_id": run.id},
+            )
+        validator = ArelleFormulaValidator(
+            cache_dir=settings.data_dir / "cache",
+            deactivated_rules=deactivated,
+        )
         result = validator.validate_detailed(package_path, taxo)  # never raises
         findings = result.findings
 

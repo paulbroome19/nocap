@@ -100,8 +100,10 @@ export interface RegisterRow {
   source: 'structural' | 'formula'
   template: string | null
   data_evaluated: string
-  result: 'PASSED' | 'FAILED' | 'WARNING' | 'NOTE'
+  result: 'PASSED' | 'FAILED' | 'WARNING' | 'NOTE' | 'DEACTIVATED'
   detail: string
+  // The human rule statement (workbook Description); formula rows only.
+  rule_text?: string | null
 }
 
 export interface FormulaSummary {

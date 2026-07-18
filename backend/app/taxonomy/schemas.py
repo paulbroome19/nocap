@@ -14,6 +14,16 @@ from pydantic import BaseModel, ConfigDict
 from app.taxonomy.models import ArtifactStatus, ReleaseSlot, SnapshotStatus
 
 
+class CapabilitySetOut(BaseModel):
+    """A release's derived capabilities (computed on read, never stored)."""
+
+    resolve: bool
+    generate: bool
+    verified_entry_points: bool
+    formula_validate: bool
+    rule_register: bool
+
+
 class SnapshotOut(BaseModel):
     """A snapshot (release) as returned by the registry endpoints."""
 
@@ -26,6 +36,9 @@ class SnapshotOut(BaseModel):
     status: SnapshotStatus
     error: str | None
     uploaded_at: datetime
+    # Populated by endpoints that compute it (registry list / detail); the
+    # run-creation release picker shows a compact indicator from it.
+    capabilities: CapabilitySetOut | None = None
 
 
 class ReleaseSlotOut(BaseModel):
@@ -44,11 +57,14 @@ class ReleaseSlotOut(BaseModel):
 
 
 class ReleaseDetailOut(BaseModel):
-    """A release plus its readiness and typed artifact slots."""
+    """A release plus its readiness, typed slots, capabilities, and warnings."""
 
     release: SnapshotOut
     ready: bool
     slots: list[ReleaseSlotOut]
+    capabilities: CapabilitySetOut
+    # Cross-artifact version-mismatch warnings (never a block).
+    coherence_warnings: list[str] = []
 
 
 class TemplateInfo(BaseModel):

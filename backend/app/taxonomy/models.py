@@ -12,12 +12,15 @@ lookup service).
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
+    Boolean,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -83,6 +86,7 @@ class ReleaseSlot(enum.StrEnum):
 
     dpm_database = "dpm_database"
     taxonomy_package = "taxonomy_package"
+    validation_rules = "validation_rules"
     filing_rules = "filing_rules"
     sample_files = "sample_files"
 
@@ -129,3 +133,46 @@ class ReleaseArtifact(Base):
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class ValidationRule(Base):
+    """One row of an ingested EBA validation-rules workbook (the ``validation_rules``
+    slot). A projection of the workbook, sealed like the DPM SQLite: the original
+    ``.xlsx`` is retained byte-for-byte on disk, this table is the queryable view.
+
+    NOT uniquely keyed on ``(snapshot, vr_code)``: the workbook is release- and
+    date-versioned, so one ``vr_code`` legitimately has several rows differing by
+    module version and ``[from_reference_date, to_reference_date]`` window (e.g.
+    ``v6272_m`` for COREP_OF_4.0 vs 4.2). Collapsing them would discard the very
+    date-window data the register join evaluates against the run's reporting date.
+    The effective row for a run is the one whose window covers its reporting date;
+    ``(snapshot_id, vr_code)`` is an indexed *lookup* key, not a uniqueness one.
+    """
+
+    __tablename__ = "validation_rule"
+    __table_args__ = (
+        Index("ix_validation_rule_snapshot_vr", "snapshot_id", "vr_code"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("taxonomy_snapshot.id"), index=True
+    )
+    # The rule id as Arelle emits it (e.g. "v6272_m", "e4428_e") — the join key
+    # to the formula run's per-rule results.
+    vr_code: Mapped[str] = mapped_column(String(64))
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    frameworks: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Module tokens carry versions, e.g. "COREP_LCR_DA_4.2, FP_4.2" — parsed for
+    # the coherence version cross-check.
+    modules: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cross_module: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    tables: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    precondition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The human-readable rule statement joined into the run's formula register.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    from_reference_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    to_reference_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(32), nullable=True)
