@@ -439,7 +439,7 @@ _RELEASE_VALID = (
 )
 
 _RESOLVE_SQL = f"""
-SELECT tv.Code, ry.Code, cx.Code, tvc.VariableVID,
+SELECT tv.Code, ry.Code, cx.Code, vv.VariableID,
        dt.Code, dt.Name, p.PeriodType, tvc.CellCode
 FROM TableVersion tv
 JOIN Cell c   ON c.TableID = tv.TableID

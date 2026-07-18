@@ -23,6 +23,7 @@ export type RunStatus =
   | 'generated'
   | 'failed_validation'
   | 'failed'
+  | 'formula_validation_running'
 
 export type Severity = 'error' | 'warning' | 'info'
 

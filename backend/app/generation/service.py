@@ -93,7 +93,8 @@ def entry_point_url(md: PackageMetadata) -> str:
 
 def report_name(md: PackageMetadata) -> str:
     """The package base name (also the zip's root folder), per Filing Rules."""
-    subject = f"{md.entity_lei}.{md.scope}"
+    # Filing Rules v5.8: the reporting subject must be uppercase.
+    subject = f"{md.entity_lei.upper()}.{md.scope.upper()}"
     fw_mod_ver = f"{md.framework_code.upper()}{module_version_6(md.module_version)}"
     module_token = md.module_code.replace("_", "").upper()
     return (
@@ -135,7 +136,7 @@ def _parameters_rows(
 ) -> list[list[str]]:
     rows: list[list[str]] = [
         ["name", "value"],
-        ["entityID", f"rs:{md.entity_lei}.{md.scope}"],
+        ["entityID", f"rs:{md.entity_lei.upper()}.{md.scope.upper()}"],
         ["refPeriod", md.reference_date.isoformat()],
     ]
     # baseCurrency only if a fact refers to it (any monetary fact).

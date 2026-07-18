@@ -51,12 +51,15 @@ export default function RunDetail() {
     load()
   }, [load])
 
-  // Poll while running.
+  // Poll while structural or formula validation is running.
+  const inProgress =
+    detail?.run.status === 'running' ||
+    detail?.run.status === 'formula_validation_running'
   useEffect(() => {
-    if (detail?.run.status !== 'running') return
+    if (!inProgress) return
     const t = setInterval(load, 1500)
     return () => clearInterval(t)
-  }, [detail?.run.status, load])
+  }, [inProgress, load])
 
   if (error) return <p className="text-sm text-red-600">{error}</p>
   if (!detail) return <p className="text-sm text-slate-400">Loading…</p>
@@ -69,6 +72,8 @@ export default function RunDetail() {
   )
   const notSubmittable = run.status === 'failed_validation'
   const errorCount = findings.filter((f) => f.severity === 'error').length
+  const formulaFindings = findings.filter((f) => f.phase === 'formula')
+  const structuralFindings = findings.filter((f) => f.phase !== 'formula')
 
   const meta: [string, string][] = [
     ['Reference date', run.reference_date],
@@ -165,42 +170,64 @@ export default function RunDetail() {
       )}
 
       {/* Validation findings */}
-      {findings.length > 0 && (
+      {(findings.length > 0 ||
+        run.status === 'formula_validation_running') && (
         <div className="mt-6">
           <h2 className="text-sm font-semibold text-slate-900">
             Validation findings{' '}
             <span className="font-normal text-slate-400">
-              ({errorCount} error{errorCount === 1 ? '' : 's'} of {findings.length})
+              ({errorCount} error{errorCount === 1 ? '' : 's'} —{' '}
+              {structuralFindings.length} structural, {formulaFindings.length} formula)
             </span>
           </h2>
-          <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
-                  <th className="px-4 py-3">Severity</th>
-                  <th className="px-4 py-3">Code</th>
-                  <th className="px-4 py-3">Location</th>
-                  <th className="px-4 py-3">Message</th>
-                </tr>
-              </thead>
-              <tbody>
-                {findings.map((f) => (
-                  <tr key={f.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-4 py-3">
-                      <SeverityBadge severity={f.severity} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-700">
-                      {f.code}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                      {findingLocation(f)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{f.message}</td>
+          {run.status === 'formula_validation_running' && (
+            <p className="mt-1 text-xs text-violet-700">
+              Formula validation (EBA rules) is running — findings will appear
+              here when it completes.
+            </p>
+          )}
+          {findings.length > 0 && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
+                    <th className="px-4 py-3">Phase</th>
+                    <th className="px-4 py-3">Severity</th>
+                    <th className="px-4 py-3">Code</th>
+                    <th className="px-4 py-3">Location</th>
+                    <th className="px-4 py-3">Message</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {findings.map((f) => (
+                    <tr key={f.id} className="border-b border-slate-100 last:border-0">
+                      <td className="px-4 py-3">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                            f.phase === 'formula'
+                              ? 'bg-violet-100 text-violet-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {f.phase === 'formula' ? 'formula' : 'structural'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <SeverityBadge severity={f.severity} />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-700">
+                        {f.code}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                        {findingLocation(f)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{f.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

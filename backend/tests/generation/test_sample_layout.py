@@ -11,12 +11,20 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from tests.generation._helpers import open_zip
 from tests.generation.test_build_package import _build
 
-SAMPLE = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "sample_xbrl_csv_package.zip"
-)
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+# Real EBA illustrative samples (fictional DUMMYLEI): 4.1 PILLAR3 IRRBBDIS and
+# 4.2 FINREP9DP. Different frameworks than our COREP LCR output, so we compare
+# *structure*, not bytes.
+SAMPLES = [
+    _FIXTURES / "sample_xbrl_csv_package.zip",
+    _FIXTURES / "sample_xbrl_csv_package_4.2.zip",
+]
+SAMPLE = SAMPLES[0]
 
 
 def _layout(zf: zipfile.ZipFile) -> dict:
@@ -43,8 +51,9 @@ def _layout(zf: zipfile.ZipFile) -> dict:
     }
 
 
-def test_our_layout_matches_sample() -> None:
-    sample = _layout(open_zip(SAMPLE.read_bytes()))
+@pytest.mark.parametrize("sample_path", SAMPLES, ids=lambda p: p.stem)
+def test_our_layout_matches_sample(sample_path: Path) -> None:
+    sample = _layout(open_zip(sample_path.read_bytes()))
     ours = _layout(open_zip(_build().content))
 
     # Same fixed structural anchors.
