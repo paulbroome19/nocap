@@ -28,6 +28,23 @@ function keyCell(value: string | null) {
   return value ? value : <span className="text-slate-300">·</span>
 }
 
+/**
+ * Compact capability indicator for the release picker. Options are text-only,
+ * so this is a terse trailing string — ready releases always resolve/generate,
+ * so it mostly conveys formula validation, the rule register, and verified
+ * entry points.
+ */
+function releaseCaps(s: Snapshot): string {
+  const c = s.capabilities
+  if (!c) return ''
+  const on = [
+    c.generate && c.verified_entry_points ? 'verified' : null,
+    c.formula_validate ? 'formula' : null,
+    c.rule_register ? 'register' : null,
+  ].filter(Boolean)
+  return on.length ? `  ·  ${on.join(' · ')}` : ''
+}
+
 export default function SuitePage() {
   const { workflowId } = useParams()
   const id = Number(workflowId)
@@ -232,6 +249,7 @@ export default function SuitePage() {
                     {releases.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.version_label} — {s.original_filename}
+                        {releaseCaps(s)}
                       </option>
                     ))}
                   </select>

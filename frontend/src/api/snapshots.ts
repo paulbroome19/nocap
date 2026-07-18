@@ -14,12 +14,15 @@ export interface Snapshot {
   status: SnapshotStatus
   error: string | null
   uploaded_at: string
+  // Present on registry list / detail responses; drives the run-picker badge.
+  capabilities?: Capabilities | null
 }
 
 // A release is a container of typed artifact slots.
 export type ReleaseSlotKind =
   | 'dpm_database'
   | 'taxonomy_package'
+  | 'validation_rules'
   | 'filing_rules'
   | 'sample_files'
 
@@ -30,10 +33,12 @@ export type ArtifactStatus =
   | 'ready'
   | 'failed'
 
+export type Requirement = 'required' | 'formula' | 'register' | 'reference'
+
 export interface ReleaseSlot {
   slot: ReleaseSlotKind
   label: string
-  requirement: 'required' | 'formula' | 'reference'
+  requirement: Requirement
   accept: string[]
   description: string
   status: ArtifactStatus
@@ -43,10 +48,21 @@ export interface ReleaseSlot {
   uploaded_at: string | null
 }
 
+// Derived from which functional artifacts are ready (computed server-side).
+export interface Capabilities {
+  resolve: boolean
+  generate: boolean
+  verified_entry_points: boolean
+  formula_validate: boolean
+  rule_register: boolean
+}
+
 export interface ReleaseDetail {
   release: Snapshot
   ready: boolean
   slots: ReleaseSlot[]
+  capabilities: Capabilities
+  coherence_warnings: string[]
 }
 
 async function parseError(res: Response): Promise<string> {

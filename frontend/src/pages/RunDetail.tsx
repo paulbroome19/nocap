@@ -217,6 +217,7 @@ const RESULT_STYLE: Record<string, string> = {
   FAILED: 'bg-red-50 text-red-700',
   WARNING: 'bg-amber-50 text-amber-700',
   NOTE: 'bg-sky-50 text-sky-700',
+  DEACTIVATED: 'bg-slate-100 text-slate-500',
 }
 
 function FormulaNote({ formula }: { formula: FormulaSummary | null }) {
@@ -292,7 +293,7 @@ function Register({
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-xs text-slate-400">Result</span>
         {chip(result === 'all', () => setResult('all'), 'All')}
-        {['PASSED', 'FAILED', 'WARNING', 'NOTE'].map((r) =>
+        {['PASSED', 'FAILED', 'WARNING', 'NOTE', 'DEACTIVATED'].map((r) =>
           chip(result === r, () => setResult(r), r[0] + r.slice(1).toLowerCase()),
         )}
         <span className="ml-3 text-xs text-slate-400">Source</span>
@@ -347,7 +348,14 @@ function Register({
                     {r.result}
                   </span>
                 </td>
-                <td className="px-4 py-2 text-xs text-slate-500">{r.detail}</td>
+                <td className="px-4 py-2 text-xs text-slate-500">
+                  {r.detail}
+                  {r.rule_text && (
+                    <div className="mt-0.5 font-mono text-[11px] text-slate-400">
+                      {r.rule_text}
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
             {filtered.length === 0 && (
