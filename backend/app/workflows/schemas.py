@@ -31,6 +31,34 @@ class EntityOut(BaseModel):
     default_scope: str
 
 
+class EntityWrite(BaseModel):
+    """Create/update payload for a reporting entity."""
+
+    name: str
+    lei: str
+    country: str
+    default_scope: str  # IND | CON
+
+
+class EntityWorkflowConfigOut(BaseModel):
+    """Per-(entity, workflow) reporting configuration."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    entity_id: int
+    workflow_id: int
+    # template code -> "true" | "false" (Auto is the absence of an entry)
+    indicator_declarations: dict[str, str]
+    base_currency: str | None
+    decimals: int | None
+
+
+class EntityWorkflowConfigWrite(BaseModel):
+    indicator_declarations: dict[str, str] = {}
+    base_currency: str | None = None
+    decimals: int | None = None
+
+
 class RunCreate(BaseModel):
     workflow_id: int
     snapshot_id: int
