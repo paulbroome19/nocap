@@ -20,29 +20,36 @@ from app.workflows.models import Entity, WorkflowConfig
 
 logger = logging.getLogger(__name__)
 
-# (name, framework_code, module_code) — module codes are the DPM ModuleVersion
-# codes for our reporting scope.
-WORKFLOW_SEED: list[tuple[str, str, str]] = [
-    ("COREP — Own Funds", "COREP", "COREP_OF"),
-    ("COREP — Leverage Ratio", "COREP", "COREP_LR"),
-    ("COREP — Large Exposures", "COREP", "COREP_LE"),
-    ("COREP — LCR (Delegated Act)", "COREP", "COREP_LCR_DA"),
-    ("COREP — Additional Liquidity Monitoring", "COREP", "COREP_ALM"),
-    ("COREP — NSFR (Stable Funding)", "COREP", "COREP_NSFR"),
-    ("COREP — FRTB", "COREP", "COREP_FRTB"),
-    ("Asset Encumbrance", "AE", "AE"),
-    ("FINREP (IFRS9)", "FINREP", "FINREP9"),
-    ("Pillar 3 — P3DH", "PILLAR3", "P3DH"),
-    ("Investment Firms — Class 2", "IF", "IF_CLASS2"),
-    ("Investment Firms — Class 3", "IF", "IF_CLASS3"),
-    ("Investment Firms — Group Test", "IF", "IF_GROUPTEST"),
-    ("Investment Firms — Threshold Monitoring", "IF", "IF_TM"),
-    ("IRRBB", "IRRBB", "IRRBB"),
-    ("Remuneration — High Earners (CI)", "REM", "REM_HE_CI"),
-    ("Remuneration — Benchmarking (CI)", "REM", "REM_BM_CI"),
-    ("Resolution 1", "RES", "RESOL1"),
-    ("Resolution 2", "RES", "RESOL2"),
-    ("MREL / TLAC", "MREL", "MREL_TLAC"),
+# (name, framework_code, module_code, category, is_active) — module codes are the
+# DPM ModuleVersion codes. Active suites show in the Reporting UI under their
+# category; inactive ones only appear in Settings. Display names are clean (no
+# "COREP —" prefix); the module code stays as the technical subtitle in the UI.
+WORKFLOW_SEED: list[tuple[str, str, str, str | None, bool]] = [
+    # Liquidity
+    ("LCR", "COREP", "COREP_LCR_DA", "Liquidity", True),
+    ("NSFR", "COREP", "COREP_NSFR", "Liquidity", True),
+    ("Additional Liquidity Monitoring", "COREP", "COREP_ALM", "Liquidity", True),
+    ("Asset Encumbrance", "AE", "AE", "Liquidity", True),
+    # Capital
+    ("Own Funds", "COREP", "COREP_OF", "Capital", True),
+    ("Leverage Ratio", "COREP", "COREP_LR", "Capital", True),
+    ("Large Exposures", "COREP", "COREP_LE", "Capital", True),
+    ("FRTB", "COREP", "COREP_FRTB", "Capital", True),
+    # Financial
+    ("FINREP", "FINREP", "FINREP9", "Financial", True),
+    # Last Mile Reporting
+    ("Investment Firms", "IF", "IF_CLASS2", "Last Mile Reporting", True),
+    ("IRRBB", "IRRBB", "IRRBB", "Last Mile Reporting", True),
+    ("Pillar 3", "PILLAR3", "P3DH", "Last Mile Reporting", True),
+    ("Remuneration — High Earners", "REM", "REM_HE_CI", "Last Mile Reporting", True),
+    ("Resolution", "RES", "RESOL2", "Last Mile Reporting", True),
+    # Inactive — hidden from Reporting, editable in Settings.
+    ("Investment Firms — Class 3", "IF", "IF_CLASS3", None, False),
+    ("Investment Firms — Group Test", "IF", "IF_GROUPTEST", None, False),
+    ("Investment Firms — Threshold Monitoring", "IF", "IF_TM", None, False),
+    ("Remuneration — Benchmarking (CI)", "REM", "REM_BM_CI", None, False),
+    ("Resolution 1", "RES", "RESOL1", None, False),
+    ("MREL / TLAC", "MREL", "MREL_TLAC", None, False),
 ]
 
 
@@ -70,21 +77,32 @@ def seed_entities(db: Session) -> int:
 
 
 def seed_workflow_configs(db: Session) -> int:
-    """Insert any missing workflow configs. Returns the number inserted."""
-    existing = set(db.scalars(select(WorkflowConfig.module_code)))
+    """Upsert the workflow configs. Returns the number newly inserted.
+
+    Existing rows (matched by module code) are updated in place — name, category,
+    framework, and is_active — so re-seeding applies the current catalogue (clean
+    display names + categories) to an already-seeded database.
+    """
+    existing = {w.module_code: w for w in db.scalars(select(WorkflowConfig))}
     inserted = 0
-    for name, framework_code, module_code in WORKFLOW_SEED:
-        if module_code in existing:
-            continue
-        db.add(
-            WorkflowConfig(
-                name=name,
-                framework_code=framework_code,
-                module_code=module_code,
-                active=True,
+    for name, framework_code, module_code, category, is_active in WORKFLOW_SEED:
+        wf = existing.get(module_code)
+        if wf is None:
+            db.add(
+                WorkflowConfig(
+                    name=name,
+                    framework_code=framework_code,
+                    module_code=module_code,
+                    category=category,
+                    is_active=is_active,
+                )
             )
-        )
-        inserted += 1
+            inserted += 1
+        else:
+            wf.name = name
+            wf.framework_code = framework_code
+            wf.category = category
+            wf.is_active = is_active
     db.commit()
     return inserted
 

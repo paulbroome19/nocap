@@ -125,7 +125,7 @@ export default function ReleaseDetail() {
   return (
     <section>
       <PageHeader
-        back={{ to: '/releases', label: 'Releases' }}
+        back={{ to: '/releases', label: 'Taxonomy Releases' }}
         title={
           <span className="flex items-center gap-3">
             Release {release.version_label}

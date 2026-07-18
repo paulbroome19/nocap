@@ -1,23 +1,53 @@
-// Shared UI primitives — keeps page layout, spacing, and states consistent.
+// Shared UI primitives — consistent layout, spacing, and states.
 
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-/** Page heading with an optional back link, subtitle, and right-aligned actions. */
+export type Crumb = { label: string; to?: string }
+
+/** Breadcrumb trail, e.g. Reporting → Liquidity → LCR. */
+export function Breadcrumb({ items }: { items: Crumb[] }) {
+  return (
+    <nav className="flex items-center gap-1.5 text-xs text-slate-400">
+      {items.map((c, i) => {
+        const last = i === items.length - 1
+        return (
+          <span key={i} className="flex items-center gap-1.5">
+            {c.to && !last ? (
+              <Link to={c.to} className="transition-colors hover:text-slate-700">
+                {c.label}
+              </Link>
+            ) : (
+              <span className={last ? 'font-medium text-slate-600' : ''}>
+                {c.label}
+              </span>
+            )}
+            {!last && <span className="text-slate-300">/</span>}
+          </span>
+        )
+      })}
+    </nav>
+  )
+}
+
+/** Page heading with optional breadcrumb, subtitle, and right-aligned actions. */
 export function PageHeader({
   title,
   subtitle,
+  crumbs,
   back,
   actions,
 }: {
   title: ReactNode
   subtitle?: ReactNode
+  crumbs?: Crumb[]
   back?: { to: string; label: string }
   actions?: ReactNode
 }) {
   return (
     <div className="mb-6">
-      {back && (
+      {crumbs && <Breadcrumb items={crumbs} />}
+      {back && !crumbs && (
         <Link
           to={back.to}
           className="text-xs text-slate-500 transition-colors hover:text-slate-800"
@@ -25,8 +55,8 @@ export function PageHeader({
           ← {back.label}
         </Link>
       )}
-      <div className="mt-1 flex items-start justify-between gap-4">
-        <div>
+      <div className="mt-2 flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
             {title}
           </h1>
@@ -47,20 +77,14 @@ export function Card({
   className?: string
 }) {
   return (
-    <div
-      className={`rounded-lg border border-slate-200 bg-white ${className}`}
-    >
+    <div className={`rounded-lg border border-slate-200 bg-white ${className}`}>
       {children}
     </div>
   )
 }
 
 /** Dashed empty-state box. */
-export function EmptyState({
-  children,
-}: {
-  children: ReactNode
-}) {
+export function EmptyState({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-400">
       {children}
@@ -68,19 +92,49 @@ export function EmptyState({
   )
 }
 
-/** Centered loading line. */
+/** Animated loading placeholder block. */
+export function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-slate-100 ${className}`} />
+}
+
+/** A grid of card skeletons for loading states. */
+export function CardSkeletons({ count = 4 }: { count?: number }) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      {Array.from({ length: count }).map((_, i) => (
+        <Skeleton key={i} className="h-28" />
+      ))}
+    </div>
+  )
+}
+
+/** A card-framed table skeleton for list loading states. */
+export function TableSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <Card className="divide-y divide-slate-100 p-0">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-4 w-1/4" />
+          <Skeleton className="ml-auto h-4 w-16" />
+        </div>
+      ))}
+    </Card>
+  )
+}
+
 export function Loading({ label = 'Loading…' }: { label?: string }) {
   return <p className="text-sm text-slate-400">{label}</p>
 }
 
-/** Inline error line. */
 export function ErrorText({ children }: { children: ReactNode }) {
   return children ? <p className="text-sm text-red-600">{children}</p> : null
 }
 
 export const fieldClass =
   'w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-900 ' +
-  'focus:border-slate-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400'
+  'focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/5 ' +
+  'disabled:bg-slate-50 disabled:text-slate-400'
 
 export const primaryBtn =
   'rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white ' +

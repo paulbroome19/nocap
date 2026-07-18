@@ -4,12 +4,14 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import Reporting from './pages/Reporting.tsx'
-import WorkflowDetail from './pages/WorkflowDetail.tsx'
+import CategoryPage from './pages/CategoryPage.tsx'
+import SuitePage from './pages/SuitePage.tsx'
 import RunDetail from './pages/RunDetail.tsx'
 import Releases from './pages/Releases.tsx'
 import ReleaseDetail from './pages/ReleaseDetail.tsx'
 import ReferenceData from './pages/ReferenceData.tsx'
 import EntityDetail from './pages/EntityDetail.tsx'
+import Settings from './pages/Settings.tsx'
 
 const router = createBrowserRouter([
   {
@@ -18,18 +20,22 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/reporting" replace /> },
 
-      // Reporting — workflows & runs.
+      // Reporting — categories → suites → runs.
       { path: 'reporting', element: <Reporting /> },
-      { path: 'reporting/workflows/:workflowId', element: <WorkflowDetail /> },
+      { path: 'reporting/:category', element: <CategoryPage /> },
+      { path: 'reporting/suites/:workflowId', element: <SuitePage /> },
       { path: 'reporting/runs/:runId', element: <RunDetail /> },
 
-      // Releases — DPM & taxonomy artifacts.
+      // Taxonomy Releases.
       { path: 'releases', element: <Releases /> },
       { path: 'releases/:snapshotId', element: <ReleaseDetail /> },
 
-      // Reference Data — entities & per-workflow config.
+      // Reference Data.
       { path: 'reference', element: <ReferenceData /> },
       { path: 'reference/entities/:entityId', element: <EntityDetail /> },
+
+      // Settings.
+      { path: 'settings', element: <Settings /> },
 
       // Legacy paths → new homes.
       { path: 'workflows', element: <Navigate to="/reporting" replace /> },

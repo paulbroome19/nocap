@@ -233,14 +233,9 @@ function WorkflowConfigSection({
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-900">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
         Per-workflow configuration
       </h2>
-      <p className="mt-1 text-sm text-slate-500">
-        Filing-indicator declarations and parameter overrides for this entity.
-        Declarations default to <span className="font-medium">Auto</span> (report
-        a template only when it has facts).
-      </p>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
@@ -298,10 +293,6 @@ function WorkflowConfigSection({
               <h3 className="text-sm font-semibold text-slate-900">
                 Parameter overrides
               </h3>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Used as defaults when a run is created. Leave blank for the
-                system defaults.
-              </p>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <label className="flex flex-col gap-1">
                   <span className="text-xs font-medium text-slate-600">

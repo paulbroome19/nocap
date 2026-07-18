@@ -34,10 +34,11 @@ def ready_snapshot(db_session: Session, mini_dpm: Path) -> TaxonomySnapshot:
 @pytest.fixture
 def lcr_workflow(db_session: Session) -> WorkflowConfig:
     wf = WorkflowConfig(
-        name="COREP — LCR (Delegated Act)",
+        name="LCR",
         framework_code="COREP",
         module_code="COREP_LCR_DA",
-        active=True,
+        category="Liquidity",
+        is_active=True,
     )
     db_session.add(wf)
     db_session.commit()
