@@ -3,6 +3,8 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 type NavItem = { to: string; label: string; icon: ReactNode }
 
+// The primary sections. This list is the single place sections are declared —
+// adding a future fifth section is one more entry here, nothing else.
 // prettier-ignore
 const NAV: NavItem[] = [
   {
@@ -12,7 +14,7 @@ const NAV: NavItem[] = [
   },
   {
     to: '/releases',
-    label: 'Taxonomy Releases',
+    label: 'Taxonomies',
     icon: (
       <path
         d="M4 7l8-4 8 4-8 4-8-4zm0 5l8 4 8-4M4 17l8 4 8-4"

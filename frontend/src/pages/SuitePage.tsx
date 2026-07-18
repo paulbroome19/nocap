@@ -23,27 +23,11 @@ import {
   primaryBtn,
 } from '../components/ui'
 import { formatDate, formatTime } from '../lib/format'
+import { usePrimaryRegulator } from '../lib/useRegulator'
 
 /** Empty instance key → a subtle middot; alignment preserved. */
 function keyCell(value: string | null) {
   return value ? value : <span className="text-slate-300">·</span>
-}
-
-/**
- * Compact capability indicator for the release picker. Options are text-only,
- * so this is a terse trailing string — ready releases always resolve/generate,
- * so it mostly conveys formula validation, the rule register, and verified
- * entry points.
- */
-function releaseCaps(s: Snapshot): string {
-  const c = s.capabilities
-  if (!c) return ''
-  const on = [
-    c.generate && c.verified_entry_points ? 'verified' : null,
-    c.formula_validate ? 'formula' : null,
-    c.rule_register ? 'register' : null,
-  ].filter(Boolean)
-  return on.length ? `  ·  ${on.join(' · ')}` : ''
 }
 
 export default function SuitePage() {
@@ -134,6 +118,7 @@ export default function SuitePage() {
   }
 
   const category = config?.category ?? 'Reporting'
+  const regCode = usePrimaryRegulator()?.code ?? ''
   // Group a date's runs into submission instances (by the three keys); each
   // instance shows its latest execution, with earlier ones counted. Re-executed
   // instances collapse to one row (latest prominent) rather than repeating.
@@ -158,7 +143,15 @@ export default function SuitePage() {
         title={config?.name ?? 'Suite'}
         crumbs={[
           { label: 'Reporting', to: '/reporting' },
-          { label: category, to: `/reporting/${encodeURIComponent(category)}` },
+          ...(regCode
+            ? [{ label: regCode, to: `/reporting/${regCode}` }]
+            : []),
+          {
+            label: category,
+            to: regCode
+              ? `/reporting/${regCode}/${encodeURIComponent(category)}`
+              : '/reporting',
+          },
           { label: config?.name ?? '' },
         ]}
       />
@@ -249,8 +242,7 @@ export default function SuitePage() {
                     <option value="">Select…</option>
                     {releases.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.version_label} — {s.original_filename}
-                        {releaseCaps(s)}
+                        {s.display_name}
                       </option>
                     ))}
                   </Select>

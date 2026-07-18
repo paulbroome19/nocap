@@ -16,7 +16,8 @@ describe('route table', () => {
     // New routes → their pages.
     ['/', 'index'],
     ['/reporting', 'reporting'],
-    ['/reporting/Liquidity', 'reporting/:category'],
+    ['/reporting/EBA', 'reporting/:regulatorCode'],
+    ['/reporting/EBA/Liquidity', 'reporting/:regulatorCode/:category'],
     ['/reporting/suites/4', 'reporting/suites/:workflowId'],
     ['/reporting/runs/13', 'index'],
     ['/reporting/runs/13/input', 'input'],
@@ -30,6 +31,8 @@ describe('route table', () => {
     ['/reference', 'reference'],
     ['/reference/entities/2', 'reference/entities/:entityId'],
     ['/settings', 'settings'],
+    ['/settings/reporting', 'settings/reporting'],
+    ['/settings/reporting/EBA', 'settings/reporting/:regulatorCode'],
   ])('new route %s → %s', (url, expected) => {
     expect(leaf(url)).toBe(expected)
   })
