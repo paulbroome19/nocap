@@ -338,6 +338,83 @@ def get_snapshot(db: Session, snapshot_id: int) -> TaxonomySnapshot:
 
 
 # ---------------------------------------------------------------------------
+# Artifact integrity + recovery
+# ---------------------------------------------------------------------------
+
+
+def snapshot_artifacts_present(settings: Settings, snapshot_id: int) -> bool:
+    """True if the snapshot's converted DPM SQLite exists at the storage root."""
+    return _sqlite_path(settings, snapshot_id).exists()
+
+
+def verify_snapshot(
+    db: Session, snapshot: TaxonomySnapshot, *, settings: Settings | None = None
+) -> TaxonomySnapshot:
+    """Reconcile a snapshot's status with what is actually on disk.
+
+    ``ready`` but the converted DB is missing → ``artifacts_missing`` (with a
+    clear message). ``artifacts_missing`` but the DB is present again (e.g. the
+    data dir was corrected) → back to ``ready``. Other statuses are untouched.
+    """
+    settings = settings or get_settings()
+    present = snapshot_artifacts_present(settings, snapshot.id)
+    if snapshot.status is SnapshotStatus.ready and not present:
+        snapshot.status = SnapshotStatus.artifacts_missing
+        snapshot.error = (
+            "the converted database is missing at the configured storage root; "
+            "re-ingest from the stored original to recover"
+        )
+        db.commit()
+        logger.warning("snapshot id=%s artifacts missing on disk", snapshot.id)
+    elif snapshot.status is SnapshotStatus.artifacts_missing and present:
+        snapshot.status = SnapshotStatus.ready
+        snapshot.error = None
+        db.commit()
+        logger.info("snapshot id=%s artifacts recovered; back to ready", snapshot.id)
+    return snapshot
+
+
+def verify_all_snapshots(db: Session, *, settings: Settings | None = None) -> int:
+    """Reconcile every ready/artifacts_missing snapshot. Returns count changed."""
+    settings = settings or get_settings()
+    changed = 0
+    stmt = select(TaxonomySnapshot).where(
+        TaxonomySnapshot.status.in_(
+            [SnapshotStatus.ready, SnapshotStatus.artifacts_missing]
+        )
+    )
+    for snapshot in db.scalars(stmt):
+        before = snapshot.status
+        verify_snapshot(db, snapshot, settings=settings)
+        if snapshot.status is not before:
+            changed += 1
+    return changed
+
+
+def reingest_snapshot(
+    db: Session, snapshot_id: int, *, settings: Settings | None = None
+) -> TaxonomySnapshot:
+    """Rebuild the converted DB from the stored original — no re-upload.
+
+    Reuses the ``source.accdb`` already on disk, so it bypasses the upload path
+    and its checksum de-duplication entirely. Sets status to ``ingesting``; the
+    caller schedules the conversion (see ``ingest_snapshot_task``).
+    """
+    settings = settings or get_settings()
+    snapshot = get_snapshot(db, snapshot_id)
+    if not _source_path(settings, snapshot.id).exists():
+        raise ValidationError(
+            f"cannot re-ingest snapshot id={snapshot.id}: its original file is "
+            "not on disk at the configured storage root — re-upload it instead"
+        )
+    snapshot.status = SnapshotStatus.ingesting
+    snapshot.error = None
+    db.commit()
+    logger.info("re-ingesting snapshot id=%s from stored original", snapshot.id)
+    return snapshot
+
+
+# ---------------------------------------------------------------------------
 # Lookup — the contract other stages consume via workflows
 # ---------------------------------------------------------------------------
 
@@ -498,6 +575,11 @@ def open_lookup(
 ) -> TaxonomyLookup:
     """Open a lookup for a ready snapshot. Callers own closing it."""
     settings = settings or get_settings()
+    if snapshot.status is SnapshotStatus.artifacts_missing:
+        raise ValidationError(
+            f"snapshot id={snapshot.id} artifacts are missing on disk — "
+            "re-ingest the snapshot to recover"
+        )
     if snapshot.status is not SnapshotStatus.ready:
         raise ValidationError(
             f"snapshot id={snapshot.id} is not ready "
@@ -505,7 +587,10 @@ def open_lookup(
         )
     path = _sqlite_path(settings, snapshot.id)
     if not path.exists():
-        raise NotFoundError(f"snapshot id={snapshot.id} has no converted database")
+        raise NotFoundError(
+            f"snapshot id={snapshot.id} converted database is missing at the "
+            "storage root — re-ingest the snapshot to recover"
+        )
     return TaxonomyLookup(path)
 
 

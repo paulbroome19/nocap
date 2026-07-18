@@ -33,6 +33,9 @@ def _data_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """
     d = tmp_path_factory.mktemp("nocap-data")
     os.environ["DATA_DIR"] = str(d)
+    # The startup reconcile uses the app's own engine (real Postgres); keep tests
+    # hermetic by disabling it — verify_all_snapshots is unit-tested directly.
+    os.environ["RECONCILE_SNAPSHOTS_ON_STARTUP"] = "false"
     get_settings.cache_clear()
     yield d
     get_settings.cache_clear()

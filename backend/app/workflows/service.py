@@ -98,6 +98,13 @@ def create_run(
         raise ValidationError(f"workflow {wf.name!r} is not active")
 
     snapshot = taxonomy.get_snapshot(db, snapshot_id)
+    # Reconcile with disk first so a stale "ready" surfaces as artifacts_missing.
+    taxonomy.verify_snapshot(db, snapshot, settings=settings)
+    if snapshot.status is SnapshotStatus.artifacts_missing:
+        raise ValidationError(
+            f"snapshot id={snapshot_id} artifacts are missing on disk — "
+            "re-ingest the snapshot to recover"
+        )
     if snapshot.status is not SnapshotStatus.ready:
         raise ValidationError(
             f"snapshot id={snapshot_id} is not ready "

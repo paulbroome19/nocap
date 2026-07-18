@@ -1,6 +1,10 @@
 // API client for the taxonomy snapshot registry.
 
-export type SnapshotStatus = 'ingesting' | 'ready' | 'failed'
+export type SnapshotStatus =
+  | 'ingesting'
+  | 'ready'
+  | 'failed'
+  | 'artifacts_missing'
 
 export interface Snapshot {
   id: number
@@ -29,6 +33,15 @@ export async function listSnapshots(): Promise<Snapshot[]> {
 
 export async function getSnapshot(id: number): Promise<Snapshot> {
   const res = await fetch(`/api/taxonomy/snapshots/${id}`)
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+/** Rebuild the converted DB from the stored original — no re-upload. */
+export async function reingestSnapshot(id: number): Promise<Snapshot> {
+  const res = await fetch(`/api/taxonomy/snapshots/${id}/reingest`, {
+    method: 'POST',
+  })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json()
 }

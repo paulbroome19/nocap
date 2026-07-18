@@ -6,19 +6,45 @@ package that orchestrates; this module only assembles the HTTP surface.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.comparison.router import router as comparison_router
 from app.core.config import get_settings
+from app.core.db import SessionLocal
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.facts.router import get_template_normalizer
 from app.facts.router import router as facts_router
 from app.generation.router import router as generation_router
+from app.taxonomy import service as taxonomy_service
 from app.taxonomy.router import router as taxonomy_router
 from app.taxonomy.service import normalize_template_code
 from app.validation.router import router as validation_router
 from app.workflows.router import router as workflows_router
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Reconcile snapshot status with on-disk artifacts at startup, so a stale
+    ``ready`` (e.g. after the data dir moved) is flipped to ``artifacts_missing``
+    before any run tries to use it. Best-effort and gated by a setting; a DB that
+    isn't reachable must not prevent startup. Reads settings fresh so tests can
+    disable it."""
+    if get_settings().reconcile_snapshots_on_startup:
+        try:
+            with SessionLocal() as db:
+                changed = taxonomy_service.verify_all_snapshots(db)
+            if changed:
+                logger.warning("startup: reconciled %d snapshot(s) with disk", changed)
+        except Exception:  # noqa: BLE001 — never block startup on this
+            logger.exception("startup snapshot reconciliation skipped")
+    yield
 
 
 def create_app() -> FastAPI:
@@ -26,7 +52,7 @@ def create_app() -> FastAPI:
     configure_logging()
     settings = get_settings()
 
-    app = FastAPI(title=settings.app_name, version="0.1.0")
+    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan)
     register_exception_handlers(app)
 
     # Composition root: wire the taxonomy contract's template-code normaliser

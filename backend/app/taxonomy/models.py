@@ -21,11 +21,18 @@ from app.core.db import Base
 
 
 class SnapshotStatus(enum.StrEnum):
-    """Lifecycle of a snapshot's ingestion."""
+    """Lifecycle of a snapshot's ingestion.
+
+    ``artifacts_missing`` is a distinct state for a snapshot that ingested
+    successfully but whose on-disk files are no longer present at the configured
+    storage root (e.g. the data dir moved). It is recoverable by re-ingesting
+    from the stored original — see taxonomy.service.reingest_snapshot.
+    """
 
     ingesting = "ingesting"
     ready = "ready"
     failed = "failed"
+    artifacts_missing = "artifacts_missing"
 
 
 class TaxonomySnapshot(Base):

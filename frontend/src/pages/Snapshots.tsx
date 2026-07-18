@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   listSnapshots,
+  reingestSnapshot,
   uploadSnapshot,
   type Snapshot,
 } from '../api/snapshots'
@@ -58,6 +59,19 @@ export default function Snapshots() {
       setUploadError(e instanceof Error ? e.message : String(e))
     } finally {
       setProgress(null)
+    }
+  }
+
+  const [reingesting, setReingesting] = useState<number | null>(null)
+  async function handleReingest(id: number) {
+    setReingesting(id)
+    try {
+      await reingestSnapshot(id)
+      await refresh()
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setReingesting(null)
     }
   }
 
@@ -168,14 +182,35 @@ export default function Snapshots() {
                       {s.original_filename}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge status={s.status} />
-                      {s.status === 'failed' && s.error && (
-                        <span
-                          className="ml-2 cursor-help text-xs text-red-500"
-                          title={s.error}
-                        >
-                          (why?)
-                        </span>
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={s.status} />
+                        {(s.status === 'failed' ||
+                          s.status === 'artifacts_missing') && (
+                          <>
+                            {s.error && (
+                              <span
+                                className="cursor-help text-xs text-slate-400"
+                                title={s.error}
+                              >
+                                (why?)
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleReingest(s.id)}
+                              disabled={reingesting === s.id}
+                              className="rounded border border-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                            >
+                              {reingesting === s.id ? 'Re-ingesting…' : 'Re-ingest'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {s.status === 'artifacts_missing' && (
+                        <p className="mt-1 text-xs text-orange-700">
+                          Files missing on disk. Re-ingest rebuilds them from the
+                          stored original.
+                        </p>
                       )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-400">

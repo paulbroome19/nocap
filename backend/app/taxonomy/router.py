@@ -18,12 +18,29 @@ router = APIRouter()
 
 @router.get("/snapshots", response_model=list[SnapshotOut])
 def list_snapshots(db: Session = Depends(get_db)) -> list[SnapshotOut]:
+    # Reconcile status with what's on disk so the registry never shows "ready"
+    # for a snapshot whose artifacts have gone missing.
+    service.verify_all_snapshots(db)
     return [SnapshotOut.model_validate(s) for s in service.list_snapshots(db)]
 
 
 @router.get("/snapshots/{snapshot_id}", response_model=SnapshotOut)
 def get_snapshot(snapshot_id: int, db: Session = Depends(get_db)) -> SnapshotOut:
-    return SnapshotOut.model_validate(service.get_snapshot(db, snapshot_id))
+    snapshot = service.get_snapshot(db, snapshot_id)
+    service.verify_snapshot(db, snapshot)
+    return SnapshotOut.model_validate(snapshot)
+
+
+@router.post("/snapshots/{snapshot_id}/reingest", response_model=SnapshotOut)
+def reingest_snapshot(
+    snapshot_id: int,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> SnapshotOut:
+    """Rebuild the converted DB from the stored original (no re-upload)."""
+    snapshot = service.reingest_snapshot(db, snapshot_id)
+    background.add_task(service.ingest_snapshot_task, snapshot.id)
+    return SnapshotOut.model_validate(snapshot)
 
 
 @router.post("/snapshots", response_model=SnapshotOut, status_code=202)
