@@ -70,8 +70,10 @@ class ModuleMetadata(BaseModel):
 class DatapointResolution(BaseModel):
     """Result of resolving a (template, row, column) triple to a datapoint.
 
-    ``datapoint_id`` is the DPM ``VariableVID``. ``datatype_code`` is the DPM
-    short code (e.g. ``m`` monetary, ``r`` decimal) — see docs/dpm-notes.md.
+    ``datapoint_id`` is the DPM ``VariableID`` — the key the EBA taxonomy uses
+    for its xBRL-CSV property groups (emitted as ``dp{id}``), so generated facts
+    actually load in Arelle. ``datatype_code`` is the DPM short code (e.g. ``m``
+    monetary, ``r`` decimal) — see docs/dpm-notes.md.
     """
 
     template_code: str

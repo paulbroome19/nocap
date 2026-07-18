@@ -6,21 +6,36 @@ release (module `COREP_LCR_DA`), so the data resolves to real datapoints.
 
 A run **derives** its filing indicators and parameters in-system, so the default
 flow needs only a **fact file** (pick an entity + date, upload the fact file,
-Run). `indicators_params.xlsx` is the optional **"advanced" override**.
+Run).
 
-## Three acts
+## The acts
 
-1. **`fact_sample.xlsx`** — the golden file. Validates **fully clean**
-   (`generated`, only the `ENTRY_POINT_UNVERIFIED` info finding). Template codes
-   are in a mix of accepted forms (upstream `C_73_00_a`, EBA `C 74.00.a`, DB
-   `C_76.00.a`).
-2. **`fact_sample_warnings.xlsx`** — a percentage reported as `1.45` (not a
-   ratio) → `PERCENTAGE_NOT_RATIO`. Upload it **together with the advanced
-   override** `indicators_params.xlsx` (which flags `C_72.00.a` as reported
-   though it has no facts) to also get `EMPTY_FILING_INDICATOR`. Still
-   `generated` (warnings only).
-3. **`fact_broken.xlsx`** — an unresolvable cell (`UNRESOLVED_FACT`) and a
-   non-numeric monetary value (`DATATYPE_MISMATCH`) → **`failed_validation`**
-   (the package is still produced, marked not submittable).
+1. **`fact_full.xlsx`** — the **hero file** (the "full run"). A fuller fact set
+   engineered so the module's **formula assertions actually evaluate**: it
+   populates every closed cell of C_72.00 (Liquid Assets) and C_76.00 (LCR
+   calculation) and deliberately mis-sets three cells. The rule register shows
+   **52 rules evaluated — 46 satisfied (green), 6 unsatisfied (red)** with real
+   comparison detail (e.g. `-450000 >= 0`, `0 = 980000 + 0`,
+   `1750000 = 0 - 0 - 0 - 0`). Formula validation runs in ~2 min.
+   Regenerate: `python demo/build_fact_full.py` (needs the ingested DPM).
 
-Regenerate with `python demo/build_demo.py`.
+2. **`fact_broken.xlsx`** — the "broken run". An unresolvable cell
+   (`UNRESOLVED_FACT`) and a non-numeric monetary value (`DATATYPE_MISMATCH`) →
+   **`failed_validation`**, i.e. structural failures in the register (the
+   package is still produced, marked not submittable).
+
+3. **`fact_sample.xlsx`** — the optional "clean-minimal" file. A tiny set that
+   validates **fully clean** (`generated`, only the `ENTRY_POINT_UNVERIFIED`
+   info finding). Template codes are in a mix of accepted forms.
+
+Also present: `fact_sample_warnings.xlsx` + `indicators_params.xlsx` (the
+advanced indicators/params override), which together surface
+`PERCENTAGE_NOT_RATIO` + `EMPTY_FILING_INDICATOR` warnings.
+
+Regenerate the simple files with `python demo/build_demo.py`; the hero file with
+`python demo/build_fact_full.py`.
+
+> Note: the register lights up (formula rules evaluate) only with the three
+> generation fixes — dp{VariableID}, taxonomy container expansion, and
+> template-level filing indicators — pinned by
+> `backend/tests/validation/test_formula_guard.py` (`pytest -m integration`).

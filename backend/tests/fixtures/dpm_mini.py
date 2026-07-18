@@ -81,9 +81,12 @@ _ROWS = {
         (100, 1001, 901, "{C_67.00.a, r0010, c0010, s0010}"),
     ],
     "Variable": [(900, "fact"), (901, "fact"), (902, "filingindicator")],
+    # (VariableVID, VariableID, PropertyID, ...) — VariableID is the xBRL
+    # property-group key emitted as dp{id}; kept distinct from VariableVID so the
+    # lookup test verifies the correct one is used.
     "VariableVersion": [
-        (900, 900, 800, 1, None),
-        (901, 901, 801, 1, None),
+        (900, 9900, 800, 1, None),
+        (901, 9901, 801, 1, None),
     ],
     "Property": [
         (800, 9, 1, "Stock"),  # monetary

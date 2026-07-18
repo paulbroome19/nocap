@@ -90,6 +90,20 @@ _TEMPLATE_RE = re.compile(
 )
 
 
+_TABLE_VARIANT_RE = re.compile(r"\.[a-z]$")
+
+
+def template_of(table_code: str) -> str:
+    """The regulatory template code for a table code.
+
+    EBA filing indicators are declared per *template* (e.g. ``C_73.00``); a
+    template's table variants (``C_73.00.a`` total, ``C_73.00.w`` by-currency)
+    collapse to that one indicator. Strips a trailing ``.<letter>`` variant;
+    codes with none (``C_00.01``) are returned unchanged.
+    """
+    return _TABLE_VARIANT_RE.sub("", table_code)
+
+
 def normalize_template_code(code: str, *, form: str = "db") -> str:
     """Normalise a template code to the DB (``C_67.00``) or EBA (``C 67.00``) form.
 
@@ -439,7 +453,7 @@ _RELEASE_VALID = (
 )
 
 _RESOLVE_SQL = f"""
-SELECT tv.Code, ry.Code, cx.Code, tvc.VariableVID,
+SELECT tv.Code, ry.Code, cx.Code, vv.VariableID,
        dt.Code, dt.Name, p.PeriodType, tvc.CellCode
 FROM TableVersion tv
 JOIN Cell c   ON c.TableID = tv.TableID

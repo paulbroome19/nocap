@@ -149,6 +149,9 @@ class FormulaRun:
     unavailable_reason: str | None = None
     loaded: int = 0
     deactivated: list[str] = field(default_factory=list)
+    # Count of facts Arelle rejected as unknown property groups — must be 0 for a
+    # correctly-generated package (see the dp{VariableID} fix + the CI guard).
+    unknown_property_groups: int = 0
 
 
 def rule_results_from_records(
@@ -351,12 +354,16 @@ class ArelleFormulaValidator:
         rule_results, loaded = rule_results_from_records(
             records, deactivated_rules=self._deactivated
         )
+        unknown_pg = sum(
+            1 for r in records if r.get("code") == "xbrlce:unknownPropertyGroup"
+        )
         return FormulaRun(
             findings=findings,
             rule_results=rule_results,
             available=True,
             loaded=loaded,
             deactivated=deactivated,
+            unknown_property_groups=unknown_pg,
         )
 
     def _run_arelle(

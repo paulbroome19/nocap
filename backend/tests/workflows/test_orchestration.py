@@ -87,8 +87,8 @@ def test_derived_indicators_and_parameters(
 
     indicators = _package_member(db_session, run.id, "FilingIndicators.csv")
     # Facts present -> true; other module templates -> false (incl. open C_77.00).
-    assert "C_67.00.a,true" in indicators
-    assert "C_72.00.a,false" in indicators
+    assert "C_67.00,true" in indicators
+    assert "C_72.00,false" in indicators
     assert "C_77.00,false" in indicators
 
     params = _package_member(db_session, run.id, "parameters.csv")

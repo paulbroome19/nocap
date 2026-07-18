@@ -43,7 +43,7 @@ from app.generation.schemas import (
 )
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
-from app.taxonomy.service import normalize_template_code
+from app.taxonomy.service import normalize_template_code, template_of
 from app.validation import register as validation_register
 from app.validation import report as validation_report
 from app.validation import service as validation
@@ -256,7 +256,9 @@ def _clean_declarations(declarations: dict | None) -> dict[str, str]:
         if value not in _VALID_DECLARATIONS or value == DECLARATION_AUTO:
             continue
         try:
-            out[_normalize(code)] = value
+            # Declarations are keyed at template level (matching filing
+            # indicators); a table code like C_73.00.a collapses to C_73.00.
+            out[template_of(_normalize(code))] = value
         except ValueError:
             continue
     return out
@@ -296,13 +298,23 @@ def list_module_templates(
 ) -> list:
     """Templates composing a workflow's module in a release (for the config UI).
 
-    Returns the taxonomy ``TemplateInfo`` list (code + name). Requires a ready
-    release so the module can be resolved.
+    Returns one entry per *template* (filing-indicator level): table variants
+    (``C_73.00.a`` / ``C_73.00.w``) collapse to a single ``C_73.00`` so the
+    declarations UI matches the regulatory object. Requires a ready release.
     """
+    from app.taxonomy.schemas import TemplateInfo
+
     wf = get_workflow(db, workflow_id)
     snapshot = taxonomy.get_snapshot(db, snapshot_id)
     with taxonomy.open_lookup(snapshot) as lk:
-        return lk.list_templates(wf.module_code)
+        tables = lk.list_templates(wf.module_code)
+    seen: dict[str, str] = {}
+    for t in tables:
+        tid = template_of(t.code)
+        seen.setdefault(tid, t.name)
+    return [
+        TemplateInfo(code=tid, name=name) for tid, name in sorted(seen.items())
+    ]
 
 
 def create_run(
@@ -511,25 +523,46 @@ def _derive_indicators_params(
 ) -> IndicatorsParams:
     """Derive indicators & parameters in-system from the run + its facts.
 
-    Filing indicators: every module template, reported per its declaration
-    (Auto/True/False — see ``_resolve_declaration``). Parameters: entity +
-    reference date + base currency + decimals from the run.
+    Filing indicators are per **template** (the EBA regulatory object): a
+    module's table variants (``C_73.00.a`` / ``C_73.00.w``) collapse to one
+    ``C_73.00`` indicator, reported per its declaration (Auto/True/False, where
+    Auto = any of its table variants has facts). The template-level template ids
+    are what the taxonomy's assertion preconditions key on (Filing Rule 1.6).
     """
+    template_ids = {template_of(t) for t in module_templates}
+    with_facts = {template_of(t) for t in closed_with_facts}
     return IndicatorsParams(
         filing_indicators=[
             FilingIndicator(
-                template_code=template,
-                reported=_resolve_declaration(
-                    template, declarations, closed_with_facts
-                ),
+                template_code=tid,
+                reported=_resolve_declaration(tid, declarations, with_facts),
             )
-            for template in sorted(module_templates)
+            for tid in sorted(template_ids)
         ],
         entity_lei=run.entity_lei,
         reference_date=run.reference_date,
         base_currency=run.base_currency,
         decimals=run.decimals,
     )
+
+
+def _template_level_indicators(
+    indicators: list[FilingIndicator],
+) -> list[FilingIndicator]:
+    """Collapse filing indicators to template level (dedupe table variants).
+
+    ``reported`` for a template is the OR over its table variants, so a template
+    is positive if any of its variants is. Idempotent for already template-level
+    indicators.
+    """
+    merged: dict[str, bool] = {}
+    for fi in indicators:
+        tid = template_of(fi.template_code)
+        merged[tid] = merged.get(tid, False) or fi.reported
+    return [
+        FilingIndicator(template_code=tid, reported=rep)
+        for tid, rep in sorted(merged.items())
+    ]
 
 
 def _load_declarations(db: Session, run: Run) -> dict[str, str]:
@@ -545,15 +578,17 @@ def _not_filed_findings(
 ) -> tuple[set[str], list[Finding]]:
     """Templates declared not-filed, and a warning per one that has facts.
 
-    Returns ``(excluded_templates, findings)``. Any facts for an excluded
-    template are dropped from the package; the warning records how many.
+    Works at template level: a declaration on ``C_73.00`` excludes facts for all
+    of its table variants. Returns ``(excluded_template_ids, findings)``.
     """
     excluded = {
-        t for t in module_templates if declarations.get(t) == DECLARATION_FALSE
+        tid
+        for tid in {template_of(t) for t in module_templates}
+        if declarations.get(tid) == DECLARATION_FALSE
     }
     findings: list[Finding] = []
     for template in sorted(excluded):
-        n = sum(1 for f in fact_rows if f.template_code == template)
+        n = sum(1 for f in fact_rows if template_of(f.template_code) == template)
         if n:
             findings.append(
                 Finding(
@@ -735,7 +770,9 @@ def execute_run(
             )
             findings += exclusion_findings
             active_facts = [
-                f for f in fact_rows if f.template_code not in excluded_templates
+                f
+                for f in fact_rows
+                if template_of(f.template_code) not in excluded_templates
             ]
 
             # Which closed templates actually have resolvable facts, and their
@@ -757,6 +794,12 @@ def execute_run(
                 params = _derive_indicators_params(
                     run, module_templates, closed_with_facts, declarations
                 )
+            # Filing indicators are always rendered at template level (the EBA
+            # regulatory object; Filing Rule 1.6). Collapse table variants so an
+            # uploaded override is normalised the same way as derivation.
+            params.filing_indicators = _template_level_indicators(
+                params.filing_indicators
+            )
 
             # Persist the filing-indicator outcomes for traceability — which
             # templates report true/false and why (a declaration, or Auto).
@@ -789,6 +832,7 @@ def execute_run(
                     fact_file_name=fact_files[-1].filename,
                     entity_id=run.entity_lei,
                     ref_period=run.reference_date,
+                    template_of=template_of,
                 ),
             )
 

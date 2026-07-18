@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.taxonomy.service import normalize_template_code as norm
+from app.taxonomy.service import template_of
 
 
 @pytest.mark.parametrize(
@@ -64,3 +65,23 @@ def test_unrecognised_codes_raise(bad: str) -> None:
 def test_unknown_form_raises() -> None:
     with pytest.raises(ValueError):
         norm("C_67.00", form="xbrl")
+
+
+@pytest.mark.parametrize(
+    "table,template",
+    [
+        ("C_73.00.a", "C_73.00"),  # total variant → template
+        ("C_73.00.w", "C_73.00"),  # by-currency variant → same template
+        ("C_75.01.a", "C_75.01"),
+        ("C_76.00.b", "C_76.00"),
+        ("C_00.01", "C_00.01"),  # no variant suffix → unchanged
+        ("C_77.00", "C_77.00"),
+    ],
+)
+def test_template_of_strips_table_variant(table: str, template: str) -> None:
+    assert template_of(table) == template
+
+
+def test_template_of_collapses_variants_to_one() -> None:
+    # The .a and .w table variants of a template share one filing indicator.
+    assert template_of("C_73.00.a") == template_of("C_73.00.w") == "C_73.00"
