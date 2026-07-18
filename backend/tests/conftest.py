@@ -36,6 +36,9 @@ def _data_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     # The startup reconcile uses the app's own engine (real Postgres); keep tests
     # hermetic by disabling it — verify_all_snapshots is unit-tested directly.
     os.environ["RECONCILE_SNAPSHOTS_ON_STARTUP"] = "false"
+    # Tests build the schema with create_all, not migrations, so there is no
+    # alembic_version row — skip the startup migration-head guard.
+    os.environ["CHECK_SCHEMA_ON_STARTUP"] = "false"
     # Never invoke Arelle from unit tests (the adapter is tested with canned data).
     os.environ["ARELLE_ENABLED"] = "false"
     get_settings.cache_clear()

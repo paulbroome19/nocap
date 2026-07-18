@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # tests (which use their own DB session, not the app's engine).
     reconcile_snapshots_on_startup: bool = True
 
+    # On startup, refuse to serve if the database isn't at the migration head
+    # (fail fast with a clear message instead of per-request 500s). Disabled in
+    # tests, which build the schema with create_all rather than migrations.
+    check_schema_on_startup: bool = True
+
     # Arelle EBA formula validation (v2). Feature flag to disable entirely; the
     # per-snapshot taxonomy package(s) live in the snapshot's artifact slot.
     arelle_enabled: bool = True

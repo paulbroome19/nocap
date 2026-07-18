@@ -31,12 +31,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Reconcile snapshot status with on-disk artifacts at startup, so a stale
-    ``ready`` (e.g. after the data dir moved) is flipped to ``artifacts_missing``
-    before any run tries to use it. Best-effort and gated by a setting; a DB that
-    isn't reachable must not prevent startup. Reads settings fresh so tests can
-    disable it."""
-    if get_settings().reconcile_snapshots_on_startup:
+    """Startup guards, then reconcile snapshot status with on-disk artifacts.
+
+    First a fail-fast schema check: if the database isn't at the migration head,
+    refuse to start (clear message beats per-request 500s on a missing column).
+    Then reconcile a stale ``ready`` snapshot to ``artifacts_missing``. Both read
+    settings fresh so tests can disable them; the reconcile is best-effort, but
+    the schema check is deliberately allowed to abort startup."""
+    settings = get_settings()
+    if settings.check_schema_on_startup:
+        from app.core.db import engine
+        from app.core.schema import check_schema_current
+
+        check_schema_current(engine)  # raises → fail fast, do not serve
+    if settings.reconcile_snapshots_on_startup:
         try:
             with SessionLocal() as db:
                 changed = taxonomy_service.verify_all_snapshots(db)
