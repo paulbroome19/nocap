@@ -17,8 +17,8 @@ import {
   Card,
   EmptyState,
   ErrorText,
-  Loading,
   PageHeader,
+  TableSkeleton,
   fieldClass,
   fileInputClass,
   primaryBtn,
@@ -232,7 +232,7 @@ export default function SuitePage() {
       {/* Run history */}
       <div className="mt-8">
         {runs === null ? (
-          <Loading />
+          <TableSkeleton />
         ) : runs.length === 0 ? (
           <EmptyState>No runs yet.</EmptyState>
         ) : (

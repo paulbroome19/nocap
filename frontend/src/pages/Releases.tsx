@@ -6,8 +6,8 @@ import {
   Card,
   EmptyState,
   ErrorText,
-  Loading,
   PageHeader,
+  TableSkeleton,
   fieldClass,
   fileInputClass,
   primaryBtn,
@@ -148,7 +148,7 @@ export default function Releases() {
       <ErrorText>{loadError && `Could not load releases: ${loadError}`}</ErrorText>
 
       {releases === null && !loadError ? (
-        <Loading />
+        <TableSkeleton />
       ) : releases && releases.length === 0 ? (
         <EmptyState>
           No releases yet. Use <span className="font-medium">+ New release</span>{' '}

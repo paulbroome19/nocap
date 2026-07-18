@@ -108,6 +108,21 @@ export function CardSkeletons({ count = 4 }: { count?: number }) {
   )
 }
 
+/** A card-framed table skeleton for list loading states. */
+export function TableSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <Card className="divide-y divide-slate-100 p-0">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-4 w-1/4" />
+          <Skeleton className="ml-auto h-4 w-16" />
+        </div>
+      ))}
+    </Card>
+  )
+}
+
 export function Loading({ label = 'Loading…' }: { label?: string }) {
   return <p className="text-sm text-slate-400">{label}</p>
 }

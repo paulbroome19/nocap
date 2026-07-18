@@ -6,8 +6,8 @@ import {
   Card,
   EmptyState,
   ErrorText,
-  Loading,
   PageHeader,
+  TableSkeleton,
   primaryBtn,
 } from '../components/ui'
 
@@ -60,7 +60,7 @@ export default function ReferenceData() {
       <ErrorText>{error}</ErrorText>
 
       {entities === null && !error ? (
-        <Loading />
+        <TableSkeleton />
       ) : entities && entities.length === 0 ? (
         <EmptyState>
           No entities yet. Use <span className="font-medium">+ New entity</span>{' '}

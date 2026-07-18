@@ -4,7 +4,7 @@ import {
   updateWorkflowSettings,
   type WorkflowConfig,
 } from '../api/workflows'
-import { Card, ErrorText, Loading } from '../components/ui'
+import { Card, ErrorText, TableSkeleton } from '../components/ui'
 
 const CATEGORIES = ['Liquidity', 'Capital', 'Financial', 'Last Mile Reporting']
 
@@ -78,7 +78,7 @@ export default function Settings() {
           Active Reporting
         </h2>
         {configs === null && !error ? (
-          <Loading />
+          <TableSkeleton />
         ) : (
           <Card className="overflow-x-auto">
             <table className="w-full text-sm">
