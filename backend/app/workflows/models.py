@@ -50,6 +50,15 @@ class RunStatus(enum.StrEnum):
     formula_validation_running = "formula_validation_running"
 
 
+# The reporting categories a suite can belong to (used for the Reporting UI).
+WORKFLOW_CATEGORIES = (
+    "Liquidity",
+    "Capital",
+    "Financial",
+    "Last Mile Reporting",
+)
+
+
 class WorkflowConfig(Base):
     __tablename__ = "workflow_config"
 
@@ -57,7 +66,10 @@ class WorkflowConfig(Base):
     name: Mapped[str] = mapped_column(String(255), unique=True)
     framework_code: Mapped[str] = mapped_column(String(64))
     module_code: Mapped[str] = mapped_column(String(128), unique=True)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # One of WORKFLOW_CATEGORIES; null for suites not surfaced in Reporting.
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Active suites appear in the Reporting UI; inactive ones only in Settings.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -145,8 +157,15 @@ class Run(Base):
         Integer, ForeignKey("entity.id"), nullable=True
     )
     entity_lei: Mapped[str] = mapped_column(String(64))
+    # Scope is taken from the entity record at creation (no per-run input).
     entity_scope: Mapped[str] = mapped_column(String(16))  # IND | CON
     country: Mapped[str] = mapped_column(String(2), default="XX")
+
+    # Free-text instance keys describing this submission instance. No uniqueness
+    # constraint yet — identity binding arrives with the Audit stage.
+    snapshot_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    adjusted_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    version_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # Package parameters (derived defaults; overridable per run).
     base_currency: Mapped[str] = mapped_column(String(3), default="EUR")

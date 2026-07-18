@@ -18,7 +18,40 @@ class WorkflowConfigOut(BaseModel):
     name: str
     framework_code: str
     module_code: str
-    active: bool
+    category: str | None
+    is_active: bool
+
+
+class WorkflowSettingsUpdate(BaseModel):
+    """Settings-page update for a workflow: its category and active flag."""
+
+    category: str | None = None
+    is_active: bool
+
+
+class RunSummaryOut(BaseModel):
+    """Minimal run info for last-activity chips."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    reference_date: date
+    status: RunStatus
+    created_at: datetime
+
+
+class CategoryOut(BaseModel):
+    """A reporting category with its active-suite count + latest activity."""
+
+    category: str
+    active_count: int
+    last_run: RunSummaryOut | None
+
+
+class SuiteSummaryOut(WorkflowConfigOut):
+    """A suite plus its most recent run (for the category page)."""
+
+    last_run: RunSummaryOut | None
 
 
 class EntityOut(BaseModel):
@@ -63,8 +96,11 @@ class RunCreate(BaseModel):
     workflow_id: int
     snapshot_id: int
     reference_date: date
-    entity_id: int
-    scope: str | None = None  # overrides the entity's default scope
+    entity_id: int  # scope is taken from the entity record (no per-run input)
+    # Free-text instance keys describing this submission instance.
+    snapshot_key: str | None = None
+    adjusted_key: str | None = None
+    version_key: str | None = None
     base_currency: str | None = None  # defaults to EUR
     decimals: int | None = None  # defaults to -3
     release_id: int | None = None  # defaults to the snapshot's current release
@@ -82,6 +118,9 @@ class RunOut(BaseModel):
     entity_lei: str
     entity_scope: str
     country: str
+    snapshot_key: str | None
+    adjusted_key: str | None
+    version_key: str | None
     base_currency: str
     decimals: int
     status: RunStatus

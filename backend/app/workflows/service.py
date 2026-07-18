@@ -49,6 +49,7 @@ from app.validation.arelle_adapter import ArelleFormulaValidator
 from app.validation.models import Severity, ValidationFinding, ValidationPhase
 from app.validation.schemas import Finding
 from app.workflows.models import (
+    WORKFLOW_CATEGORIES,
     Entity,
     EntityWorkflowConfig,
     Run,
@@ -84,11 +85,16 @@ def _validate_lei(entity: str) -> str:
 
 
 def list_workflows(
-    db: Session, *, active_only: bool = True
+    db: Session,
+    *,
+    active_only: bool = True,
+    category: str | None = None,
 ) -> list[WorkflowConfig]:
     stmt = select(WorkflowConfig).order_by(WorkflowConfig.name)
     if active_only:
-        stmt = stmt.where(WorkflowConfig.active.is_(True))
+        stmt = stmt.where(WorkflowConfig.is_active.is_(True))
+    if category is not None:
+        stmt = stmt.where(WorkflowConfig.category == category)
     return list(db.scalars(stmt))
 
 
@@ -97,6 +103,56 @@ def get_workflow(db: Session, workflow_id: int) -> WorkflowConfig:
     if wf is None:
         raise NotFoundError(f"workflow id={workflow_id} not found")
     return wf
+
+
+def update_workflow_settings(
+    db: Session, workflow_id: int, *, category: str | None, is_active: bool
+) -> WorkflowConfig:
+    """Settings-page update: a workflow's category and active flag."""
+    wf = get_workflow(db, workflow_id)
+    if category is not None and category not in WORKFLOW_CATEGORIES:
+        raise ValidationError(
+            f"category must be one of {', '.join(WORKFLOW_CATEGORIES)} (or null)"
+        )
+    wf.category = category
+    wf.is_active = is_active
+    db.commit()
+    db.refresh(wf)
+    return wf
+
+
+def last_run_for_workflow(db: Session, workflow_id: int) -> Run | None:
+    """The most recent run for a workflow (for last-activity chips)."""
+    return db.scalar(
+        select(Run)
+        .where(Run.workflow_id == workflow_id)
+        .order_by(Run.id.desc())
+        .limit(1)
+    )
+
+
+def category_summaries(db: Session) -> list[dict]:
+    """Per-category active-suite count + most recent run (for the landing tiles)."""
+    summaries: list[dict] = []
+    for category in WORKFLOW_CATEGORIES:
+        suites = list_workflows(db, category=category)
+        last: Run | None = None
+        for wf in suites:
+            run = last_run_for_workflow(db, wf.id)
+            if run is not None and (last is None or run.id > last.id):
+                last = run
+        summaries.append(
+            {"category": category, "active_count": len(suites), "last_run": last}
+        )
+    return summaries
+
+
+def suite_summaries(db: Session, category: str) -> list[dict]:
+    """Active suites in a category, each with its most recent run."""
+    return [
+        {"workflow": wf, "last_run": last_run_for_workflow(db, wf.id)}
+        for wf in list_workflows(db, category=category)
+    ]
 
 
 # --- run lifecycle ---------------------------------------------------------
@@ -254,7 +310,9 @@ def create_run(
     snapshot_id: int,
     reference_date: date,
     entity_id: int,
-    scope: str | None = None,
+    snapshot_key: str | None = None,
+    adjusted_key: str | None = None,
+    version_key: str | None = None,
     base_currency: str | None = None,
     decimals: int | None = None,
     release_id: int | None = None,
@@ -262,7 +320,7 @@ def create_run(
 ) -> Run:
     settings = settings or get_settings()
     wf = get_workflow(db, workflow_id)
-    if not wf.active:
+    if not wf.is_active:
         raise ValidationError(f"workflow {wf.name!r} is not active")
 
     snapshot = taxonomy.get_snapshot(db, snapshot_id)
@@ -280,9 +338,16 @@ def create_run(
         )
 
     entity = get_entity(db, entity_id)
-    run_scope = (scope or entity.default_scope).strip().upper()
+    # Scope comes from the entity record (no per-run input).
+    run_scope = entity.default_scope.strip().upper()
     if run_scope not in {"IND", "CON"}:
-        raise ValidationError("scope must be IND or CON")
+        raise ValidationError(
+            f"entity {entity.name!r} has an invalid default scope"
+        )
+
+    def _key(value: str | None) -> str | None:
+        value = (value or "").strip()
+        return value or None
 
     # Parameter defaults come from the entity+workflow config when the caller
     # doesn't specify them (blank ⇒ EUR / -3); the run still owns the values.
@@ -312,6 +377,9 @@ def create_run(
         entity_lei=_validate_lei(entity.lei),
         entity_scope=run_scope,
         country=entity.country.upper(),
+        snapshot_key=_key(snapshot_key),
+        adjusted_key=_key(adjusted_key),
+        version_key=_key(version_key),
         base_currency=currency,
         decimals=decimals if decimals is not None else -3,
         status=RunStatus.created,

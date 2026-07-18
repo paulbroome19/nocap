@@ -12,16 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.facts.schemas import (
-    FactIngestSummary,
-    IndicatorsParamsIngestSummary,
-    RunFileOut,
-)
+from app.facts.schemas import FactIngestSummary, RunFileOut
 from app.taxonomy.schemas import TemplateInfo
 from app.validation.schemas import FindingOut
 from app.workflows import service
 from app.workflows.models import RunStatus
 from app.workflows.schemas import (
+    CategoryOut,
     EntityOut,
     EntityWorkflowConfigOut,
     EntityWorkflowConfigWrite,
@@ -29,17 +26,81 @@ from app.workflows.schemas import (
     RunCreate,
     RunDetailOut,
     RunOut,
+    RunSummaryOut,
+    SuiteSummaryOut,
     WorkflowConfigOut,
+    WorkflowSettingsUpdate,
 )
 
 router = APIRouter()
 
 
+def _run_summary(run) -> RunSummaryOut | None:
+    return RunSummaryOut.model_validate(run) if run is not None else None
+
+
 @router.get("/configs", response_model=list[WorkflowConfigOut])
-def list_workflows(db: Session = Depends(get_db)) -> list[WorkflowConfigOut]:
+def list_workflows(
+    category: str | None = None,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> list[WorkflowConfigOut]:
     return [
-        WorkflowConfigOut.model_validate(w) for w in service.list_workflows(db)
+        WorkflowConfigOut.model_validate(w)
+        for w in service.list_workflows(
+            db, active_only=not include_inactive, category=category
+        )
     ]
+
+
+@router.patch("/configs/{workflow_id}", response_model=WorkflowConfigOut)
+def update_workflow_settings(
+    workflow_id: int,
+    body: WorkflowSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> WorkflowConfigOut:
+    """Settings: set a workflow's category and active flag (persists live)."""
+    wf = service.update_workflow_settings(
+        db, workflow_id, category=body.category, is_active=body.is_active
+    )
+    return WorkflowConfigOut.model_validate(wf)
+
+
+@router.get("/categories", response_model=list[CategoryOut])
+def list_categories(db: Session = Depends(get_db)) -> list[CategoryOut]:
+    """Reporting landing tiles: per-category active count + latest activity."""
+    return [
+        CategoryOut(
+            category=s["category"],
+            active_count=s["active_count"],
+            last_run=_run_summary(s["last_run"]),
+        )
+        for s in service.category_summaries(db)
+    ]
+
+
+@router.get(
+    "/categories/{category}/suites", response_model=list[SuiteSummaryOut]
+)
+def list_category_suites(
+    category: str, db: Session = Depends(get_db)
+) -> list[SuiteSummaryOut]:
+    """Active suites in a category, each with its most recent run."""
+    out: list[SuiteSummaryOut] = []
+    for s in service.suite_summaries(db, category):
+        wf = s["workflow"]
+        out.append(
+            SuiteSummaryOut(
+                id=wf.id,
+                name=wf.name,
+                framework_code=wf.framework_code,
+                module_code=wf.module_code,
+                category=wf.category,
+                is_active=wf.is_active,
+                last_run=_run_summary(s["last_run"]),
+            )
+        )
+    return out
 
 
 @router.get("/configs/{workflow_id}/templates", response_model=list[TemplateInfo])
@@ -145,7 +206,9 @@ def create_run(body: RunCreate, db: Session = Depends(get_db)) -> RunOut:
         snapshot_id=body.snapshot_id,
         reference_date=body.reference_date,
         entity_id=body.entity_id,
-        scope=body.scope,
+        snapshot_key=body.snapshot_key,
+        adjusted_key=body.adjusted_key,
+        version_key=body.version_key,
         base_currency=body.base_currency,
         decimals=body.decimals,
         release_id=body.release_id,
@@ -190,23 +253,9 @@ async def attach_fact_file(
     )
 
 
-@router.post(
-    "/runs/{run_id}/indicators-params-file",
-    response_model=IndicatorsParamsIngestSummary,
-    status_code=201,
-)
-async def attach_indicators_params_file(
-    run_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-) -> IndicatorsParamsIngestSummary:
-    data = await file.read()
-    return service.attach_indicators_params_file(
-        db,
-        run_id=run_id,
-        filename=file.filename or "indicators_params.xlsx",
-        data=data,
-    )
+# The indicators/parameters upload override is intentionally not exposed on the
+# run-creation API surface. The parser + service (attach_indicators_params_file)
+# and execute-time override path remain in the codebase for later use.
 
 
 @router.post("/runs/{run_id}/execute", response_model=RunOut)
