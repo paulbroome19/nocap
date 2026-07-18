@@ -91,6 +91,8 @@ export interface RunFile {
   filename: string
   checksum: string
   created_at: string
+  /** Whether the stored bytes are present at the storage root. */
+  available: boolean
 }
 
 export interface RunDetail {
@@ -204,3 +206,25 @@ export const getRunDetail = (runId: number) =>
 
 export const runFileDownloadUrl = (runFileId: number) =>
   `/api/workflows/run-files/${runFileId}/download`
+
+/**
+ * Download a run file gracefully: fetch it, and on error surface the server's
+ * message (instead of navigating the browser to a JSON error page). On success
+ * it triggers a normal browser download from the blob.
+ */
+export async function downloadRunFile(
+  runFileId: number,
+  filename: string,
+): Promise<void> {
+  const res = await fetch(runFileDownloadUrl(runFileId))
+  if (!res.ok) throw new Error(await parseError(res))
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}

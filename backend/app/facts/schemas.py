@@ -74,6 +74,9 @@ class RunFileOut(BaseModel):
     filename: str
     checksum: str
     created_at: datetime
+    # Whether the stored bytes are present at the storage root. Computed on read
+    # (see workflows.run_detail); a just-written file defaults to available.
+    available: bool = True
 
 
 class FactOut(BaseModel):

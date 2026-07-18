@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
+  downloadRunFile,
   getRunDetail,
-  runFileDownloadUrl,
+  type Finding,
   type RunDetail as RunDetailT,
+  type RunFile,
 } from '../api/workflows'
 import RunStatusBadge from '../components/RunStatusBadge'
 import SeverityBadge from '../components/SeverityBadge'
-import type { Finding } from '../api/workflows'
 
 function findingLocation(f: Finding): string {
   const parts: string[] = []
@@ -40,6 +41,7 @@ export default function RunDetail() {
   const id = Number(runId)
   const [detail, setDetail] = useState<RunDetailT | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     getRunDetail(id)
@@ -57,6 +59,21 @@ export default function RunDetail() {
     const t = setInterval(load, 1500)
     return () => clearInterval(t)
   }, [detail?.run.status, load])
+
+  async function handleDownload(f: RunFile) {
+    setDownloadError(null)
+    try {
+      await downloadRunFile(f.id, f.filename)
+    } catch (e) {
+      setDownloadError(
+        `Could not download ${f.filename}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      )
+      // The bytes may have gone missing since the page loaded — refresh state.
+      load()
+    }
+  }
 
   if (error) return <p className="text-sm text-red-600">{error}</p>
   if (!detail) return <p className="text-sm text-slate-400">Loading…</p>
@@ -98,6 +115,12 @@ export default function RunDetail() {
           </div>
         ))}
       </dl>
+
+      {downloadError && (
+        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {downloadError}
+        </div>
+      )}
 
       {run.status === 'failed' && (
         <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4">
@@ -146,27 +169,45 @@ export default function RunDetail() {
               >
                 {f.filename}
               </span>
-              <a
-                href={runFileDownloadUrl(f.id)}
-                className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white ${
-                  notSubmittable
-                    ? 'bg-amber-700 hover:bg-amber-800'
-                    : 'bg-emerald-700 hover:bg-emerald-800'
-                }`}
-              >
-                Download zip
-              </a>
+              {f.available ? (
+                <button
+                  type="button"
+                  onClick={() => void handleDownload(f)}
+                  className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white ${
+                    notSubmittable
+                      ? 'bg-amber-700 hover:bg-amber-800'
+                      : 'bg-emerald-700 hover:bg-emerald-800'
+                  }`}
+                >
+                  Download zip
+                </button>
+              ) : (
+                <span className="shrink-0 rounded-md bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-400">
+                  Unavailable
+                </span>
+              )}
             </div>
           ))}
-          {reports.map((f) => (
-            <a
-              key={f.id}
-              href={runFileDownloadUrl(f.id)}
-              className="mt-3 inline-block text-xs text-slate-600 underline hover:text-slate-900"
-            >
-              Download validation report
-            </a>
-          ))}
+          {reports.map((f) =>
+            f.available ? (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => void handleDownload(f)}
+                className="mt-3 inline-block text-xs text-slate-600 underline hover:text-slate-900"
+              >
+                Download validation report
+              </button>
+            ) : (
+              <span
+                key={f.id}
+                className="mt-3 inline-block text-xs text-slate-400"
+                title="The stored report is no longer on disk. Re-run to regenerate it."
+              >
+                Validation report unavailable
+              </span>
+            ),
+          )}
         </div>
       )}
 
@@ -237,12 +278,17 @@ export default function RunDetail() {
                       {f.checksum.slice(0, 12)}…
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <a
-                        href={runFileDownloadUrl(f.id)}
-                        className="text-xs text-slate-500 hover:text-slate-800 hover:underline"
-                      >
-                        download
-                      </a>
+                      {f.available ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDownload(f)}
+                          className="text-xs text-slate-500 hover:text-slate-800 hover:underline"
+                        >
+                          download
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-300">unavailable</span>
+                      )}
                     </td>
                   </tr>
                 ))}

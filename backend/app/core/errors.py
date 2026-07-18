@@ -42,6 +42,18 @@ class ConflictError(AppError):
     code = "conflict"
 
 
+class ArtifactUnavailableError(AppError):
+    """A known record's stored bytes are missing at the storage root.
+
+    Distinct from ``NotFoundError`` (the record itself is unknown): the artifact
+    existed but is gone from disk (e.g. the data dir moved). 410 Gone so clients
+    can tell "was here, now missing" from "never existed".
+    """
+
+    status_code = status.HTTP_410_GONE
+    code = "artifact_unavailable"
+
+
 class FileRejectedError(AppError):
     """An uploaded file failed shape validation. ``details`` lists row errors."""
 
