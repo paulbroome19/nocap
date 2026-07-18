@@ -120,6 +120,8 @@ export interface RegisterRow {
   blocking?: boolean
   // Per-evaluation detail for formula rows (individual failing contexts).
   evaluations?: RuleEvaluation[] | null
+  satisfied?: number | null
+  not_satisfied?: number | null
 }
 
 export interface Verdict {

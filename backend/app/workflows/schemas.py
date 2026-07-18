@@ -154,6 +154,8 @@ class RegisterRowOut(BaseModel):
     severity: str | None = None  # error | warning | info | None (unknown)
     blocking: bool = False
     evaluations: list | None = None  # per-evaluation detail (formula)
+    satisfied: int | None = None
+    not_satisfied: int | None = None
 
 
 class FactRowOut(BaseModel):

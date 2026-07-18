@@ -251,6 +251,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
             data_evaluated=r.data_evaluated, result=r.result, detail=r.detail,
             rule_text=r.rule_text, description=r.description, severity=r.severity,
             blocking=r.blocking, evaluations=r.evaluations,
+            satisfied=r.satisfied, not_satisfied=r.not_satisfied,
         )
         for r in service.build_run_register(db, run, findings)
     ]

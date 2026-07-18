@@ -242,6 +242,9 @@ class RegisterRow:
     # Per-evaluation detail for formula rows: [{message, values, template_code,
     # row_code, column_code}], the individual failing contexts.
     evaluations: list | None = None
+    # Formula evaluation counts, so "N evaluations" is never bare.
+    satisfied: int | None = None
+    not_satisfied: int | None = None
 
 
 def _phase(f: Finding) -> str:
@@ -351,6 +354,8 @@ def _formula_rows(
                 severity=severity,
                 blocking=bool(rule.get("blocking")) and result == "FAILED",
                 evaluations=rule.get("evaluations") or None,
+                satisfied=sat,
+                not_satisfied=notsat,
             )
         )
     return rows
