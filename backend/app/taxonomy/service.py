@@ -43,7 +43,32 @@ from app.taxonomy.schemas import (
     DatapointResolution,
     ModuleMetadata,
     TemplateInfo,
+    XmlMember,
+    XmlQName,
+    XmlSignature,
 )
+
+# EBA dictionary namespace roots for xBRL-XML (see docs/xml-notes.md).
+_DICT_NS = "http://www.eba.europa.eu/xbrl/crr/dict"
+_MET_NS = f"{_DICT_NS}/met"
+# The DPM "_PR" category: every Property (metric / dimension) has a counterpart
+# Item here (ItemID == PropertyID) carrying its code + introduction release.
+_PR_CATEGORY_ID = 1002
+
+
+def _dim_namespace(version: str) -> tuple[str, str]:
+    return f"eba_dim_{version}", f"{_DICT_NS}/dim/{version}"
+
+
+def _member_qname(signature: str) -> XmlQName | None:
+    """Parse a member ``ItemCategory.Signature`` (``eba_PL:x11``) to a QName."""
+    if ":" not in signature:
+        return None  # typed/key member (open tables) — not an explicit member
+    prefix, local = signature.split(":", 1)
+    domain = prefix.removeprefix("eba_")
+    return XmlQName(
+        prefix=prefix, namespace=f"{_DICT_NS}/dom/{domain}", local=local
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +93,13 @@ DPM_TABLES = [
     "Property",
     "DataType",
     "Release",
+    # xBRL-XML context assembly (see docs/xml-notes.md): the metric/dimension
+    # codes + member QNames (ItemCategory) and the datapoint's dimensional
+    # signature (Context.Signature — the serialized ContextComposition, so the
+    # 1.7M-row ContextComposition table is NOT projected: +4.6s / +45 MB per
+    # snapshot vs +12.6s / +145 MB for the full projection).
+    "ItemCategory",
+    "Context",
 ]
 
 # A converted snapshot must contain these (non-empty Release) to be a readable
@@ -674,7 +706,8 @@ _RELEASE_VALID = (
 
 _RESOLVE_SQL = f"""
 SELECT tv.Code, ry.Code, cx.Code, vv.VariableID,
-       dt.Code, dt.Name, p.PeriodType, tvc.CellCode
+       dt.Code, dt.Name, p.PeriodType, tvc.CellCode,
+       vv.PropertyID, vv.ContextID
 FROM TableVersion tv
 JOIN Cell c   ON c.TableID = tv.TableID
 JOIN Header hr ON hr.HeaderID = c.RowID    AND hr.Direction = 'Y'
@@ -794,7 +827,82 @@ class TaxonomyLookup:
             datatype_name=row[5],
             period_type=row[6],
             cell_code=row[7],
+            property_id=int(row[8]) if row[8] is not None else None,
+            context_id=int(row[9]) if row[9] is not None else None,
         )
+
+    def _release_code(self, release_id: int) -> str:
+        row = self._conn.execute(
+            "SELECT Code FROM Release WHERE ReleaseID = ?", (release_id,)
+        ).fetchone()
+        return str(row[0]) if row else str(release_id)
+
+    def _property_code(self, property_id: int, rid: int) -> str | None:
+        """The code of a Property's counterpart _PR Item (metric/dimension)."""
+        row = self._conn.execute(
+            "SELECT Code FROM ItemCategory WHERE ItemID = ? AND CategoryID = ? "
+            "AND StartReleaseID <= ? ORDER BY StartReleaseID DESC LIMIT 1",
+            (property_id, _PR_CATEGORY_ID, rid),
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    def _dimension_qname(self, property_id: int) -> XmlQName | None:
+        """A dimension's QName: code + its introduction-release namespace."""
+        row = self._conn.execute(
+            "SELECT Code, MIN(StartReleaseID) FROM ItemCategory "
+            "WHERE ItemID = ? AND CategoryID = ?",
+            (property_id, _PR_CATEGORY_ID),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        prefix, ns = _dim_namespace(self._release_code(int(row[1])))
+        return XmlQName(prefix=prefix, namespace=ns, local=str(row[0]))
+
+    def _member_signature(self, item_id: int, rid: int) -> str | None:
+        row = self._conn.execute(
+            "SELECT Signature FROM ItemCategory WHERE ItemID = ? "
+            "AND StartReleaseID <= ? ORDER BY StartReleaseID DESC LIMIT 1",
+            (item_id, rid),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
+    def xml_signature(
+        self,
+        property_id: int,
+        context_id: int | None,
+        *,
+        release_id: int | None = None,
+    ) -> XmlSignature | None:
+        """The full xBRL-XML signature (metric + scenario) of a datapoint.
+
+        Returns ``None`` if the metric can't be named or any dimension/member
+        can't be resolved to an explicit member (e.g. a typed/open-table key) —
+        the caller then treats the fact as not XML-generable, exactly as an
+        unresolved fact. See docs/xml-notes.md for the derivation.
+        """
+        rid = release_id if release_id is not None else self.default_release_id()
+        metric_code = self._property_code(property_id, rid)
+        if metric_code is None:
+            return None
+        metric = XmlQName(prefix="eba_met", namespace=_MET_NS, local=metric_code)
+
+        members: list[XmlMember] = []
+        if context_id is not None:
+            sig = self._conn.execute(
+                "SELECT Signature FROM Context WHERE ContextID = ?", (context_id,)
+            ).fetchone()
+            if sig and sig[0]:
+                for pair in str(sig[0]).strip("#").split("#"):
+                    if not pair:
+                        continue
+                    dim_id, mem_id = (int(x) for x in pair.split("_"))
+                    dim = self._dimension_qname(dim_id)
+                    member_sig = self._member_signature(mem_id, rid)
+                    member = _member_qname(member_sig) if member_sig else None
+                    if dim is None or member is None:
+                        return None  # can't build a valid explicit member
+                    members.append(XmlMember(dimension=dim, member=member))
+        return XmlSignature(metric=metric, members=members)
 
     def list_templates(
         self, module_code: str, *, release_id: int | None = None
