@@ -228,12 +228,15 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         # Reconcile with disk so a missing artifact is a clear state, not a 404
         # on click (mirrors the snapshot artifact reconciliation).
         out.available = service.run_file_available(settings, f)
+        out.size_bytes = service.run_file_size(settings, f)
         return out
 
     return RunDetailOut(
         run=RunOut.model_validate(run),
         files=[_file_out(f) for f in files],
         findings=[FindingOut.model_validate(f) for f in findings],
+        fact_count=service.count_facts(db, run_id),
+        filing_indicators=run.filing_indicators,
     )
 
 

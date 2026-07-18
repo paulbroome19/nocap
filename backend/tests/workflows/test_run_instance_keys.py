@@ -91,6 +91,49 @@ def test_create_run_api_no_scope_input(
     assert body["entity_scope"] == "CON"  # entity default, not the stray "IND"
 
 
+def test_run_detail_traceability(
+    client,
+    db_session: Session,
+    ready_snapshot: TaxonomySnapshot,
+    lcr_workflow: WorkflowConfig,
+    entity: Entity,
+    demo_fact_xlsx: bytes,  # 2 facts, both C_67.00.a
+) -> None:
+    # Declare C_72.00.a filed-true (no facts) so we can see a "declared" source.
+    service.upsert_entity_workflow_config(
+        db_session,
+        entity_id=entity.id,
+        workflow_id=lcr_workflow.id,
+        indicator_declarations={"C_72.00.a": "true"},
+        base_currency=None,
+        decimals=None,
+    )
+    run = service.create_run(
+        db_session,
+        workflow_id=lcr_workflow.id,
+        snapshot_id=ready_snapshot.id,
+        reference_date=date(2025, 12, 31),
+        entity_id=entity.id,
+    )
+    service.attach_fact_file(
+        db_session, run_id=run.id, filename="f.xlsx", data=demo_fact_xlsx
+    )
+    service.execute_run(db_session, run.id)
+
+    detail = client.get(f"/api/workflows/runs/{run.id}").json()
+    assert detail["fact_count"] == 2
+
+    fis = {f["template_code"]: f for f in detail["filing_indicators"]}
+    assert fis["C_72.00.a"]["reported"] is True
+    assert fis["C_72.00.a"]["source"] == "declared"
+    assert fis["C_67.00.a"]["reported"] is True  # has facts
+    assert fis["C_67.00.a"]["source"] == "auto"
+
+    pkg = next(f for f in detail["files"] if f["role"] == "package_output")
+    assert pkg["size_bytes"] and pkg["size_bytes"] > 0
+    assert pkg["available"] is True
+
+
 def test_suite_summary_reports_last_run(
     client,
     db_session: Session,

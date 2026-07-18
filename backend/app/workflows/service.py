@@ -15,7 +15,7 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -27,7 +27,7 @@ from app.core.errors import (
     ValidationError,
 )
 from app.facts import service as facts
-from app.facts.models import RunFile, RunFileRole
+from app.facts.models import Fact, RunFile, RunFileRole
 from app.facts.parsers import default_indicators_params_parser
 from app.facts.schemas import (
     FactIngestSummary,
@@ -738,6 +738,23 @@ def execute_run(
                     run, module_templates, closed_with_facts, declarations
                 )
 
+            # Persist the filing-indicator outcomes for traceability — which
+            # templates report true/false and why (a declaration, or Auto).
+            run.filing_indicators = [
+                {
+                    "template_code": fi.template_code,
+                    "reported": fi.reported,
+                    "source": (
+                        "declared"
+                        if ind_files
+                        or declarations.get(fi.template_code)
+                        in (DECLARATION_TRUE, DECLARATION_FALSE)
+                        else "auto"
+                    ),
+                }
+                for fi in params.filing_indicators
+            ]
+
             # Phase 1 — pre-generation checks on the facts (excluding not-filed
             # templates, so a declared-not-filed template with facts doesn't trip
             # the missing-indicator rule).
@@ -910,6 +927,19 @@ def get_run_file(db: Session, run_file_id: int) -> RunFile:
 def run_file_available(settings: Settings, run_file: RunFile) -> bool:
     """Whether a run file's stored bytes are present at the storage root."""
     return facts.run_file_present(settings, run_file)
+
+
+def run_file_size(settings: Settings, run_file: RunFile) -> int | None:
+    """Size of a run file's stored bytes, or None if it is missing."""
+    path = settings.data_dir / run_file.storage_key
+    return path.stat().st_size if path.exists() else None
+
+
+def count_facts(db: Session, run_id: int) -> int:
+    """Number of fact rows ingested for a run."""
+    return db.scalar(
+        select(func.count()).select_from(Fact).where(Fact.run_id == run_id)
+    )
 
 
 def read_run_file_path(settings: Settings, run_file: RunFile) -> Path:

@@ -88,12 +88,19 @@ export interface Finding {
   column_code: string | null
 }
 
+export interface FilingIndicatorOutcome {
+  template_code: string
+  reported: boolean
+  source: 'declared' | 'auto'
+}
+
 export interface Run {
   id: number
   workflow_id: number
   snapshot_id: number
   release_id: number
   reference_date: string
+  entity_id: number | null
   entity_lei: string
   entity_scope: string
   country: string
@@ -116,12 +123,15 @@ export interface RunFile {
   checksum: string
   created_at: string
   available: boolean
+  size_bytes: number | null
 }
 
 export interface RunDetail {
   run: Run
   files: RunFile[]
   findings: Finding[]
+  fact_count: number
+  filing_indicators: FilingIndicatorOutcome[] | null
 }
 
 async function parseError(res: Response): Promise<string> {

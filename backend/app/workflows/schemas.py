@@ -129,9 +129,19 @@ class RunOut(BaseModel):
     created_at: datetime
 
 
+class FilingIndicatorOutcome(BaseModel):
+    """A derived filing-indicator outcome, with its provenance."""
+
+    template_code: str
+    reported: bool
+    source: str  # "declared" | "auto"
+
+
 class RunDetailOut(BaseModel):
-    """Run detail: the run, its attached files, and its validation findings."""
+    """Run detail: the run, its files, findings, and traceability data."""
 
     run: RunOut
     files: list[RunFileOut]
     findings: list[FindingOut]
+    fact_count: int
+    filing_indicators: list[FilingIndicatorOutcome] | None

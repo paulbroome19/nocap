@@ -77,6 +77,8 @@ class RunFileOut(BaseModel):
     # Whether the stored bytes are present at the storage root. Computed on read
     # (see workflows.run_detail); a just-written file defaults to available.
     available: bool = True
+    # Size of the stored bytes, computed on read (None when unavailable).
+    size_bytes: int | None = None
 
 
 class FactOut(BaseModel):
