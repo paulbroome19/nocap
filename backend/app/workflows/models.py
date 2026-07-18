@@ -31,14 +31,18 @@ from app.core.db import Base
 
 
 class RunStatus(enum.StrEnum):
-    """Run lifecycle. A ``validated`` step sits between generation and finalising
-    the run (see workflows.service) — currently a pass-through the validation
-    stage will fill in."""
+    """Run lifecycle.
+
+    After the package is built, structural validation runs; a run with any
+    error-severity finding ends ``failed_validation`` (the package is still
+    stored, marked not-submittable). ``failed`` is an unexpected/aborted run.
+    """
 
     created = "created"
     files_attached = "files_attached"
     running = "running"
     generated = "generated"
+    failed_validation = "failed_validation"
     failed = "failed"
 
 

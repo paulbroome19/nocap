@@ -17,6 +17,7 @@ from app.facts.schemas import (
     IndicatorsParamsIngestSummary,
     RunFileOut,
 )
+from app.validation.schemas import FindingOut
 from app.workflows import service
 from app.workflows.schemas import (
     RunCreate,
@@ -62,9 +63,11 @@ def create_run(body: RunCreate, db: Session = Depends(get_db)) -> RunOut:
 def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
     run = service.get_run(db, run_id)
     files = service.run_files(db, run_id)
+    findings = service.list_findings(db, run_id)
     return RunDetailOut(
         run=RunOut.model_validate(run),
         files=[RunFileOut.model_validate(f) for f in files],
+        findings=[FindingOut.model_validate(f) for f in findings],
     )
 
 

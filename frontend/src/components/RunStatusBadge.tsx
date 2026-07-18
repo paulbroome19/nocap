@@ -5,6 +5,7 @@ const STYLES: Record<RunStatus, string> = {
   files_attached: 'bg-sky-100 text-sky-800 ring-sky-600/20',
   running: 'bg-amber-100 text-amber-800 ring-amber-600/20',
   generated: 'bg-emerald-100 text-emerald-800 ring-emerald-600/20',
+  failed_validation: 'bg-red-100 text-red-800 ring-red-600/20',
   failed: 'bg-red-100 text-red-800 ring-red-600/20',
 }
 
@@ -13,6 +14,7 @@ const LABELS: Record<RunStatus, string> = {
   files_attached: 'files attached',
   running: 'running',
   generated: 'generated',
+  failed_validation: 'failed validation',
   failed: 'failed',
 }
 

@@ -38,6 +38,9 @@ from app.generation.schemas import (
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import SnapshotStatus
 from app.taxonomy.service import normalize_template_code
+from app.validation import service as validation
+from app.validation.models import Severity, ValidationFinding, ValidationPhase
+from app.validation.schemas import Finding
 from app.workflows.models import Run, RunStatus, WorkflowConfig
 
 logger = logging.getLogger(__name__)
@@ -235,15 +238,53 @@ def _load_params(settings: Settings, run_file: RunFile) -> IndicatorsParams:
     return result.params
 
 
-def _run_validation(db: Session, run: Run, package: GeneratedPackage) -> None:
-    """SEAM for the validation stage — currently a pass-through.
+def _safe_validate(what: str, fn) -> list[Finding]:
+    """Run a validator; a crash becomes a finding, never a failed run."""
+    try:
+        return fn()
+    except Exception as exc:  # noqa: BLE001 — validation must never crash a run
+        logger.exception("validator %s raised", what)
+        return [
+            Finding(
+                severity=Severity.error,
+                phase=ValidationPhase.pre_generation,
+                code="VALIDATOR_ERROR",
+                message=f"the {what} validator raised: {exc}",
+            )
+        ]
 
-    The validation stage will run structural checks here (every (report,row,col)
-    resolves; values parse under the datatype; filing indicators consistent;
-    package layout conforms), persist a ``validation_report`` RunFile, and fail
-    the run on hard errors. For now generation flows straight to ``generated``.
-    """
-    return None
+
+def _persist_findings(
+    db: Session, run_id: int, findings: list[Finding]
+) -> None:
+    # Re-execute replaces the prior run's findings.
+    db.query(ValidationFinding).filter(ValidationFinding.run_id == run_id).delete()
+    db.add_all(
+        ValidationFinding(run_id=run_id, **f.model_dump()) for f in findings
+    )
+    db.commit()
+
+
+def list_findings(db: Session, run_id: int) -> list[ValidationFinding]:
+    return list(
+        db.scalars(
+            select(ValidationFinding)
+            .where(ValidationFinding.run_id == run_id)
+            .order_by(ValidationFinding.severity, ValidationFinding.id)
+        )
+    )
+
+
+def _report_header(
+    run: Run, wf: WorkflowConfig, package: GeneratedPackage
+) -> list[str]:
+    return [
+        f"Run #{run.id}  •  {wf.name}  [{wf.module_code}]",
+        f"Entity: {run.entity_lei}.{run.entity_scope}   "
+        f"Reference date: {run.reference_date}",
+        f"Snapshot: {run.snapshot_id} (release {run.release_id})   "
+        f"Package: {package.filename}",
+    ]
 
 
 def execute_run(
@@ -255,9 +296,10 @@ def execute_run(
         raise ValidationError(f"run id={run_id} is already running")
 
     files = facts.list_run_files(db, run.id)
-    if not any(f.role is RunFileRole.fact_input for f in files):
-        raise ValidationError("no fact file attached to this run")
+    fact_files = [f for f in files if f.role is RunFileRole.fact_input]
     ind_files = [f for f in files if f.role is RunFileRole.indicators_params]
+    if not fact_files:
+        raise ValidationError("no fact file attached to this run")
     if not ind_files:
         raise ValidationError(
             "no indicators/parameters file attached to this run"
@@ -283,6 +325,7 @@ def execute_run(
             )
             for f in fact_rows
         ]
+        findings: list[Finding] = []
 
         with taxonomy.open_lookup(snapshot, settings=settings) as lk:
             meta = lk.module_metadata(wf.module_code, release_id=run.release_id)
@@ -290,6 +333,33 @@ def execute_run(
                 raise ValidationError(
                     f"module {wf.module_code} is not in the bound snapshot"
                 )
+            module_templates = {
+                t.code
+                for t in lk.list_templates(wf.module_code, release_id=run.release_id)
+            }
+
+            def resolve(t, r, c):
+                return lk.resolve(t, r, c, release_id=run.release_id)
+
+            # Phase 1 — pre-generation checks on the facts.
+            findings += _safe_validate(
+                "facts",
+                lambda: validation.validate_facts(
+                    facts=fact_rows,
+                    resolve=resolve,
+                    module_templates=module_templates,
+                    filing_indicators=params.filing_indicators,
+                    fact_file_name=fact_files[-1].filename,
+                    entity_id=run.entity_lei,
+                    ref_period=run.reference_date,
+                ),
+            )
+            datatypes_present = {
+                res.datatype_code
+                for f in fact_rows
+                if (res := resolve(f.template_code, f.row_code, f.column_code))
+            }
+
             metadata = PackageMetadata(
                 entity_lei=run.entity_lei,
                 scope=run.entity_scope,
@@ -309,35 +379,50 @@ def execute_run(
                     for fi in params.filing_indicators
                 ],
             )
+            # Lenient build so a package is always produced for inspection; the
+            # unresolved/duplicate facts are reported as findings above.
             package = generation.build_package(
-                fact_inputs,
-                metadata,
-                resolve=lambda t, r, c: lk.resolve(
-                    t, r, c, release_id=run.release_id
-                ),
+                fact_inputs, metadata, resolve=resolve, strict=False
             )
 
-        # Validation seam (pass-through in v1) — see _run_validation.
-        _run_validation(db, run, package)
+        # Phase 2 — post-generation checks on the built package.
+        findings += _safe_validate(
+            "package",
+            lambda: validation.validate_package(
+                package_bytes=package.content,
+                package_filename=package.filename,
+                datatypes_present=datatypes_present,
+            ),
+        )
 
-        def _store(session, rid, filename, data):
+        def _store(session, rid, filename, data, role=RunFileRole.package_output):
             return facts.store_run_file(
-                session,
-                run_id=rid,
-                role=RunFileRole.package_output,
-                filename=filename,
-                data=data,
+                session, run_id=rid, role=role, filename=filename, data=data,
                 settings=settings,
             )
 
+        # Persist findings, the package (always), and the validation report.
+        _persist_findings(db, run.id, findings)
         generation.store_package(db, run_id=run.id, package=package, store=_store)
-        run.status = RunStatus.generated
+        report = validation.build_report_text(
+            header_lines=_report_header(run, wf, package), findings=findings
+        )
+        _store(
+            db, run.id, f"validation_report_run{run.id}.txt",
+            report.encode("utf-8"), role=RunFileRole.validation_report,
+        )
+
+        has_errors = any(f.severity is Severity.error for f in findings)
+        run.status = (
+            RunStatus.failed_validation if has_errors else RunStatus.generated
+        )
         db.commit()
         logger.info(
-            "run id=%s generated %s (%d facts)",
+            "run id=%s %s (%d findings, %d errors)",
             run.id,
-            package.filename,
-            package.fact_count,
+            run.status.value,
+            len(findings),
+            sum(f.severity is Severity.error for f in findings),
             extra={"run_id": run.id},
         )
     except ValidationError as exc:

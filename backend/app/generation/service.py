@@ -181,11 +181,15 @@ def build_package(
     metadata: PackageMetadata,
     *,
     resolve: TemplateResolver,
+    strict: bool = True,
 ) -> GeneratedPackage:
     """Resolve facts to datapoints and assemble the xBRL-CSV package zip.
 
-    Raises ``ValidationError`` (with details) if any fact fails to resolve or a
-    template has two facts for the same datapoint with different values.
+    ``strict`` (default): raise ``ValidationError`` (with details) if any fact
+    fails to resolve or a template has two facts for the same datapoint with
+    different values. ``strict=False``: skip unresolved facts and keep the first
+    value on a conflict, so a package is always produced for inspection — the
+    caller (workflows) reports those problems as validation findings instead.
     """
     # template code -> {datapoint_id: value}
     by_template: dict[str, dict[int, str]] = defaultdict(dict)
@@ -213,12 +217,12 @@ def build_package(
         cell[res.datapoint_id] = fact.value
         datatypes.add(res.datatype_code)
 
-    if unresolved:
+    if strict and unresolved:
         raise ValidationError(
             "facts do not resolve to datapoints in the bound snapshot",
             details=unresolved,
         )
-    if conflicts:
+    if strict and conflicts:
         raise ValidationError(
             "conflicting values for the same datapoint", details=conflicts
         )

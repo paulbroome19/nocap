@@ -130,6 +130,19 @@ def test_unresolved_fact_raises_with_details() -> None:
     assert exc.value.details and exc.value.details[0]["template"] == "C_99.99"
 
 
+def test_non_strict_skips_unresolved_and_keeps_first() -> None:
+    facts = [
+        fi("C_73.00.a", "0010", "0010", "4500000"),  # resolves
+        fi("C_99.99", "0010", "0010", "1"),  # unresolved -> skipped
+        fi("C_73.00.a", "0010", "0010", "9999999"),  # dup -> first kept
+    ]
+    pkg = build_package(facts, metadata(), resolve=resolver(_MAP), strict=False)
+    assert pkg.templates == ["C_73.00.a"]
+    assert read_member(pkg.content, "c_73.00.a.csv") == (
+        b"datapoint,factValue\r\ndp5436020,4500000\r\n"
+    )
+
+
 def test_conflicting_datapoint_raises() -> None:
     facts = [
         fi("C_73.00.a", "0010", "0010", "1"),

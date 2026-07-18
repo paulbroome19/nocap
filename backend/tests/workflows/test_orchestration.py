@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.errors import ValidationError
 from app.facts.models import RunFileRole
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
+from app.validation.models import Severity
 from app.workflows import service
 from app.workflows.models import RunStatus, WorkflowConfig
 from app.workflows.seed import seed_workflow_configs
@@ -68,6 +69,15 @@ def test_full_run_generates_package(
     assert outputs[0].filename.endswith(".zip")
     assert "COREPLCRDA" in outputs[0].filename
 
+    # A clean run: zero errors, plus the expected ENTRY_POINT_UNVERIFIED info.
+    findings = service.list_findings(db_session, run.id)
+    assert not [f for f in findings if f.severity is Severity.error]
+    assert [f.code for f in findings if f.severity is Severity.info] == [
+        "ENTRY_POINT_UNVERIFIED"
+    ]
+    # Validation report artifact was written.
+    assert any(f.role is RunFileRole.validation_report for f in files)
+
     # The stored package is a valid zip with the expected structure.
     path = get_settings().data_dir / outputs[0].storage_key
     zf = zipfile.ZipFile(path)
@@ -113,9 +123,15 @@ def test_unresolvable_fact_fails_run_with_details(
     )
 
     run = service.execute_run(db_session, run.id)
-    assert run.status is RunStatus.failed
-    assert run.failure_details
-    assert run.failure_details[0]["template"] == "C_67.00.a"
+    # Validation catches the unresolvable fact; the run ends failed_validation
+    # (not the unexpected-error `failed`) and the package is still stored.
+    assert run.status is RunStatus.failed_validation
+    findings = service.list_findings(db_session, run.id)
+    unresolved = [f for f in findings if f.code == "UNRESOLVED_FACT"]
+    assert unresolved and unresolved[0].row_code == "9999"
+    files = service.run_files(db_session, run.id)
+    assert any(f.role is RunFileRole.package_output for f in files)
+    assert any(f.role is RunFileRole.validation_report for f in files)
 
 
 def test_execute_without_indicators_rejected(

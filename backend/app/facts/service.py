@@ -127,6 +127,8 @@ def ingest_fact_file(
             value=f.value,
             entity=entity,
             reference_date=reference_date,
+            source_sheet=f.source_sheet,
+            source_row=f.source_row,
         )
         for f in result.facts
     )
