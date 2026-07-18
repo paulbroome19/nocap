@@ -68,6 +68,36 @@ export function PageHeader({
   )
 }
 
+/** A single row in a minimal vertical list (name + chevron). */
+export function RowLink({
+  to,
+  title,
+  subtitle,
+}: {
+  to: string
+  title: string
+  subtitle?: string
+}) {
+  return (
+    <Link
+      to={to}
+      className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-slate-50"
+    >
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium text-slate-900">
+          {title}
+        </div>
+        {subtitle && (
+          <div className="mt-0.5 truncate font-mono text-xs text-slate-400">
+            {subtitle}
+          </div>
+        )}
+      </div>
+      <span className="shrink-0 text-slate-300">→</span>
+    </Link>
+  )
+}
+
 /** White surface card. */
 export function Card({
   children,

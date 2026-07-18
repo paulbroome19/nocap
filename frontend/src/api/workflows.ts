@@ -94,6 +94,32 @@ export interface FilingIndicatorOutcome {
   source: 'declared' | 'auto'
 }
 
+export interface CheckResult {
+  key: string
+  label: string
+  status: 'pass' | 'warning' | 'fail' | 'note'
+  errors: number
+  warnings: number
+  infos: number
+}
+
+export interface FormulaSummary {
+  status: 'executed' | 'unavailable' | 'not_run'
+  unsatisfied: number
+  unsatisfied_rule_ids: string[]
+  deactivated: string[]
+  note: string | null
+}
+
+export interface FactRow {
+  template_code: string
+  row_code: string
+  column_code: string
+  value: string
+  source_sheet: string | null
+  source_row: number | null
+}
+
 export interface Run {
   id: number
   workflow_id: number
@@ -132,6 +158,8 @@ export interface RunDetail {
   findings: Finding[]
   fact_count: number
   filing_indicators: FilingIndicatorOutcome[] | null
+  structural_checks: CheckResult[]
+  formula_summary: FormulaSummary | null
 }
 
 async function parseError(res: Response): Promise<string> {
@@ -254,6 +282,9 @@ export const executeRun = (runId: number) =>
 
 export const getRunDetail = (runId: number) =>
   getJSON<RunDetail>(`/api/workflows/runs/${runId}`)
+
+export const getRunFacts = (runId: number) =>
+  getJSON<FactRow[]>(`/api/workflows/runs/${runId}/facts`)
 
 export const runFileDownloadUrl = (runFileId: number) =>
   `/api/workflows/run-files/${runFileId}/download`

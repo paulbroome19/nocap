@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { listSnapshots, type Snapshot } from '../api/snapshots'
 import {
@@ -15,10 +15,8 @@ import {
 import RunStatusBadge from '../components/RunStatusBadge'
 import {
   Card,
-  EmptyState,
   ErrorText,
   PageHeader,
-  TableSkeleton,
   fieldClass,
   fileInputClass,
   primaryBtn,
@@ -32,7 +30,7 @@ export default function SuitePage() {
   const [config, setConfig] = useState<WorkflowConfig | null>(null)
   const [releases, setReleases] = useState<Snapshot[]>([])
   const [entities, setEntities] = useState<Entity[]>([])
-  const [runs, setRuns] = useState<Run[] | null>(null)
+  const [runs, setRuns] = useState<Run[]>([])
 
   // Form state
   const [reportingDate, setReportingDate] = useState('')
@@ -45,6 +43,7 @@ export default function SuitePage() {
 
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
   const loadRuns = useCallback(() => {
     if (id) runHistory(id).then(setRuns).catch(() => setRuns([]))
@@ -56,6 +55,26 @@ export default function SuitePage() {
     listEntities().then(setEntities)
     loadRuns()
   }, [id, loadRuns])
+
+  // Runs grouped by reporting date, newest date first.
+  const byDate = useMemo(() => {
+    const m = new Map<string, Run[]>()
+    for (const r of runs) {
+      const arr = m.get(r.reference_date)
+      if (arr) arr.push(r)
+      else m.set(r.reference_date, [r])
+    }
+    return m
+  }, [runs])
+  const dates = useMemo(
+    () => [...byDate.keys()].sort((a, b) => b.localeCompare(a)),
+    [byDate],
+  )
+  useEffect(() => {
+    if (dates.length && (selectedDate === null || !byDate.has(selectedDate))) {
+      setSelectedDate(dates[0])
+    }
+  }, [dates, byDate, selectedDate])
 
   const ready =
     reportingDate !== '' &&
@@ -91,7 +110,7 @@ export default function SuitePage() {
   }
 
   const category = config?.category ?? 'Reporting'
-  const entityLabel = (e: Entity) => `${e.name} · ${e.lei}`
+  const dateRuns = selectedDate ? (byDate.get(selectedDate) ?? []) : []
 
   return (
     <section>
@@ -99,10 +118,7 @@ export default function SuitePage() {
         title={config?.name ?? 'Suite'}
         crumbs={[
           { label: 'Reporting', to: '/reporting' },
-          {
-            label: category,
-            to: `/reporting/${encodeURIComponent(category)}`,
-          },
+          { label: category, to: `/reporting/${encodeURIComponent(category)}` },
           { label: config?.name ?? '' },
         ]}
       />
@@ -118,7 +134,7 @@ export default function SuitePage() {
           </p>
         ) : (
           <div className="space-y-4">
-            {/* Row 1 — Reporting Date, Entity */}
+            {/* Reporting Date + Entity */}
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-slate-600">
@@ -143,14 +159,14 @@ export default function SuitePage() {
                   <option value="">Select…</option>
                   {entities.map((en) => (
                     <option key={en.id} value={en.id}>
-                      {entityLabel(en)}
+                      {en.name} · {en.lei}
                     </option>
                   ))}
                 </select>
               </label>
             </div>
 
-            {/* Row 2 — instance keys */}
+            {/* Instance keys */}
             <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3">
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 Instance keys
@@ -179,38 +195,45 @@ export default function SuitePage() {
               </div>
             </div>
 
-            {/* Taxonomy release + fact file */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-slate-600">
-                  Taxonomy Release
-                </span>
-                <select
-                  className={fieldClass}
-                  value={releaseId}
-                  onChange={(e) =>
-                    setReleaseId(e.target.value === '' ? '' : Number(e.target.value))
-                  }
-                >
-                  <option value="">Select…</option>
-                  {releases.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.version_label} — {s.original_filename}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-slate-600">
-                  Fact file (XLSX)
-                </span>
-                <input
-                  type="file"
-                  accept=".xlsx"
-                  className={fileInputClass}
-                  onChange={(e) => setFactFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
+            {/* What you're running: taxonomy release + fact file, together */}
+            <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                What you&rsquo;re running
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-slate-600">
+                    Taxonomy Release
+                  </span>
+                  <select
+                    className={fieldClass}
+                    value={releaseId}
+                    onChange={(e) =>
+                      setReleaseId(
+                        e.target.value === '' ? '' : Number(e.target.value),
+                      )
+                    }
+                  >
+                    <option value="">Select…</option>
+                    {releases.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.version_label} — {s.original_filename}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-slate-600">
+                    Fact file (XLSX)
+                  </span>
+                  <input
+                    type="file"
+                    accept=".xlsx"
+                    className={fileInputClass}
+                    onChange={(e) => setFactFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              </div>
             </div>
 
             <div className="flex items-center gap-3 pt-1">
@@ -229,20 +252,45 @@ export default function SuitePage() {
         )}
       </Card>
 
-      {/* Run history */}
-      <div className="mt-8">
-        {runs === null ? (
-          <TableSkeleton />
-        ) : runs.length === 0 ? (
-          <EmptyState>No runs yet.</EmptyState>
-        ) : (
-          <Card className="overflow-x-auto">
+      {/* History — organised by reporting date, newest first */}
+      {dates.length > 0 && (
+        <div className="mt-8 flex gap-6">
+          {/* Date selector */}
+          <div className="w-40 shrink-0">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Reporting date
+            </div>
+            <div className="space-y-1">
+              {dates.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setSelectedDate(d)}
+                  className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left font-mono text-xs transition-colors ${
+                    selectedDate === d
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {d}
+                  <span
+                    className={
+                      selectedDate === d ? 'text-slate-300' : 'text-slate-400'
+                    }
+                  >
+                    {byDate.get(d)?.length}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Runs for the selected date */}
+          <Card className="min-w-0 flex-1 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
                   <th className="px-4 py-3">Run</th>
-                  <th className="px-4 py-3">Reporting Date</th>
-                  <th className="px-4 py-3">Entity</th>
                   <th className="px-4 py-3">Snapshot</th>
                   <th className="px-4 py-3">Adjusted</th>
                   <th className="px-4 py-3">Version</th>
@@ -250,7 +298,7 @@ export default function SuitePage() {
                 </tr>
               </thead>
               <tbody>
-                {runs.map((r) => (
+                {dateRuns.map((r) => (
                   <tr
                     key={r.id}
                     onClick={() => navigate(`/reporting/runs/${r.id}`)}
@@ -258,10 +306,6 @@ export default function SuitePage() {
                   >
                     <td className="px-4 py-3 font-medium text-slate-900">
                       #{r.id}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{r.reference_date}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                      {r.entity_lei}.{r.entity_scope}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">
                       {r.snapshot_key ?? '—'}
@@ -280,8 +324,8 @@ export default function SuitePage() {
               </tbody>
             </table>
           </Card>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   )
 }

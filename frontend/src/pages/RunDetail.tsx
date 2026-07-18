@@ -6,8 +6,12 @@ import {
   getConfig,
   getEntity,
   getRunDetail,
+  getRunFacts,
+  type CheckResult,
   type Entity,
+  type FactRow,
   type Finding,
+  type FormulaSummary,
   type RunDetail as RunDetailT,
   type RunFile,
   type WorkflowConfig,
@@ -38,13 +42,6 @@ function findingLocation(f: Finding): string {
     .join(' ')
   if (cell) parts.push(cell)
   return parts.join('  ·  ') || '—'
-}
-
-function formatBytes(n: number | null): string {
-  if (n == null) return '—'
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
 type Counts = { error: number; warning: number; info: number }
@@ -92,9 +89,7 @@ function StateBanner({ status, error }: { status: string; error: string | null }
     label: status,
   }
   return (
-    <div
-      className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${s.cls}`}
-    >
+    <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${s.cls}`}>
       <span className={`h-2.5 w-2.5 rounded-full ${s.dot}`} />
       <span className="text-sm font-semibold">{s.label}</span>
       {status === 'failed' && error && (
@@ -104,101 +99,102 @@ function StateBanner({ status, error }: { status: string; error: string | null }
   )
 }
 
-// --- pipeline timeline -----------------------------------------------------
+// --- checks executed -------------------------------------------------------
 
-type StepState = 'done' | 'active' | 'error' | 'skipped' | 'pending'
-
-function StepIcon({ state }: { state: StepState }) {
-  const base = 'flex h-7 w-7 items-center justify-center rounded-full text-xs'
-  if (state === 'done')
-    return <span className={`${base} bg-emerald-100 text-emerald-700`}>✓</span>
-  if (state === 'error')
-    return <span className={`${base} bg-red-100 text-red-700`}>!</span>
-  if (state === 'active')
-    return (
-      <span className={`${base} bg-amber-100 text-amber-700`}>
-        <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-      </span>
-    )
-  return <span className={`${base} bg-slate-100 text-slate-400`}>○</span>
+const CHECK_STATUS: Record<string, string> = {
+  pass: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+  warning: 'bg-amber-50 text-amber-700 ring-amber-600/20',
+  fail: 'bg-red-50 text-red-700 ring-red-600/20',
+  note: 'bg-sky-50 text-sky-700 ring-sky-600/20',
 }
 
-function Pipeline({ detail }: { detail: RunDetailT }) {
-  const { run, findings, files, fact_count } = detail
-  const structural = findings.filter((f) => phaseGroup(f.phase) === 'structural')
-  const formula = findings.filter((f) => phaseGroup(f.phase) === 'formula')
-  const pkg = files.find((f) => f.role === 'package_output')
-  const executed = !['created', 'files_attached'].includes(run.status)
-
-  const sErr = structural.filter((f) => f.severity === 'error').length
-  const fErr = formula.filter((f) => f.severity === 'error').length
-
-  const steps: { label: string; sub: string; state: StepState }[] = [
-    {
-      label: 'Facts ingested',
-      sub: `${fact_count} fact${fact_count === 1 ? '' : 's'}`,
-      state: executed ? 'done' : 'pending',
-    },
-    {
-      label: 'Structural validation',
-      sub: executed ? `${structural.length} findings` : 'pending',
-      state: !executed
-        ? 'pending'
-        : run.status === 'running'
-          ? 'active'
-          : sErr > 0
-            ? 'error'
-            : 'done',
-    },
-    {
-      label: 'Package generated',
-      sub: pkg ? pkg.filename : 'pending',
-      state: pkg ? 'done' : run.status === 'failed' ? 'error' : 'pending',
-    },
-    {
-      label: 'Formula validation',
-      sub:
-        run.status === 'formula_validation_running'
-          ? 'running…'
-          : formula.length > 0
-            ? `${formula.length} findings`
-            : executed
-              ? 'not run'
-              : 'pending',
-      state:
-        run.status === 'formula_validation_running'
-          ? 'active'
-          : formula.length > 0
-            ? fErr > 0
-              ? 'error'
-              : 'done'
-            : 'skipped',
-    },
-  ]
-
+function ChecksExecuted({
+  checks,
+  formula,
+}: {
+  checks: CheckResult[]
+  formula: FormulaSummary | null
+}) {
   return (
-    <div className="flex items-stretch">
-      {steps.map((s, i) => (
-        <div key={s.label} className="flex flex-1 items-start">
-          <div className="flex min-w-0 flex-col items-center px-2 text-center">
-            <StepIcon state={s.state} />
-            <div className="mt-2 text-xs font-medium text-slate-700">
-              {s.label}
-            </div>
-            <div className="mt-0.5 max-w-[9rem] truncate font-mono text-[11px] text-slate-400">
-              {s.sub}
-            </div>
-          </div>
-          {i < steps.length - 1 && (
-            <div className="mt-3.5 h-px flex-1 bg-slate-200" />
-          )}
+    <div className="space-y-4">
+      <Card className="overflow-hidden">
+        <div className="border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Structural checks executed
         </div>
-      ))}
+        <table className="w-full text-sm">
+          <tbody>
+            {checks.map((c) => (
+              <tr key={c.key} className="border-b border-slate-100 last:border-0">
+                <td className="px-5 py-2.5 text-slate-700">{c.label}</td>
+                <td className="px-5 py-2.5">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ring-1 ring-inset ${
+                      CHECK_STATUS[c.status] ?? CHECK_STATUS.note
+                    }`}
+                  >
+                    {c.status}
+                  </span>
+                </td>
+                <td className="px-5 py-2.5 text-right font-mono text-xs text-slate-400">
+                  {c.errors}E / {c.warnings}W / {c.infos}I
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <Card className="p-5">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Formula validation
+        </div>
+        <FormulaBlock formula={formula} />
+      </Card>
     </div>
   )
 }
 
-// --- findings console ------------------------------------------------------
+function FormulaBlock({ formula }: { formula: FormulaSummary | null }) {
+  if (!formula || formula.status === 'not_run') {
+    return <p className="text-sm text-slate-400">Has not run for this run.</p>
+  }
+  if (formula.status === 'unavailable') {
+    return (
+      <p className="text-sm text-slate-600">
+        Not run — {formula.note ?? 'unavailable'}.
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="text-slate-700">
+        Executed —{' '}
+        <span className="font-medium">{formula.unsatisfied}</span> rule
+        {formula.unsatisfied === 1 ? '' : 's'} unsatisfied.
+      </p>
+      {formula.unsatisfied_rule_ids.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {formula.unsatisfied_rule_ids.map((r) => (
+            <span
+              key={r}
+              className="rounded bg-red-50 px-1.5 py-0.5 font-mono text-xs text-red-700"
+            >
+              {r}
+            </span>
+          ))}
+        </div>
+      )}
+      {formula.deactivated.length > 0 && (
+        <p className="text-xs text-slate-400">
+          Deactivated rules excluded:{' '}
+          <span className="font-mono">{formula.deactivated.join(', ')}</span>
+        </p>
+      )}
+    </div>
+  )
+}
+
+// --- findings detail -------------------------------------------------------
 
 function SummaryCard({ title, counts }: { title: string; counts: Counts }) {
   const items: [string, number, string][] = [
@@ -225,14 +221,13 @@ function SummaryCard({ title, counts }: { title: string; counts: Counts }) {
   )
 }
 
-function FindingsConsole({ detail }: { detail: RunDetailT }) {
+function FindingsDetail({ findings }: { findings: Finding[] }) {
   const [severity, setSeverity] = useState<'all' | 'error' | 'warning' | 'info'>(
     'all',
   )
   const [phase, setPhase] = useState<'all' | 'structural' | 'formula'>('all')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
-  const findings = detail.findings
   const structural = findings.filter((f) => phaseGroup(f.phase) === 'structural')
   const formula = findings.filter((f) => phaseGroup(f.phase) === 'formula')
 
@@ -242,7 +237,6 @@ function FindingsConsole({ detail }: { detail: RunDetailT }) {
       (phase === 'all' || phaseGroup(f.phase) === phase),
   )
 
-  // Group by template code.
   const groups = new Map<string, Finding[]>()
   for (const f of filtered) {
     const key = f.template_code ?? 'General'
@@ -251,13 +245,7 @@ function FindingsConsole({ detail }: { detail: RunDetailT }) {
     else groups.set(key, [f])
   }
 
-  const clean = findings.length === 0
-
-  const chip = (
-    active: boolean,
-    onClick: () => void,
-    label: string,
-  ) => (
+  const chip = (active: boolean, onClick: () => void, label: string) => (
     <button
       key={label}
       type="button"
@@ -272,6 +260,19 @@ function FindingsConsole({ detail }: { detail: RunDetailT }) {
     </button>
   )
 
+  if (findings.length === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-6">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+          ✓
+        </span>
+        <div className="text-sm font-semibold text-emerald-900">
+          0 errors — all checks passed
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -279,166 +280,94 @@ function FindingsConsole({ detail }: { detail: RunDetailT }) {
         <SummaryCard title="Formula" counts={countBy(formula)} />
       </div>
 
-      {clean ? (
-        <div className="mt-4 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-6">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-            ✓
-          </span>
-          <div>
-            <div className="text-sm font-semibold text-emerald-900">
-              0 errors — all checks passed
-            </div>
-            <div className="text-xs text-emerald-700">
-              No validation findings were raised for this run.
-            </div>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-400">Severity</span>
-            {chip(severity === 'all', () => setSeverity('all'), 'All')}
-            {chip(severity === 'error', () => setSeverity('error'), 'Errors')}
-            {chip(severity === 'warning', () => setSeverity('warning'), 'Warnings')}
-            {chip(severity === 'info', () => setSeverity('info'), 'Info')}
-            <span className="ml-3 text-xs text-slate-400">Phase</span>
-            {chip(phase === 'all', () => setPhase('all'), 'All')}
-            {chip(phase === 'structural', () => setPhase('structural'), 'Structural')}
-            {chip(phase === 'formula', () => setPhase('formula'), 'Formula')}
-          </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-slate-400">Severity</span>
+        {chip(severity === 'all', () => setSeverity('all'), 'All')}
+        {chip(severity === 'error', () => setSeverity('error'), 'Errors')}
+        {chip(severity === 'warning', () => setSeverity('warning'), 'Warnings')}
+        {chip(severity === 'info', () => setSeverity('info'), 'Info')}
+        <span className="ml-3 text-xs text-slate-400">Phase</span>
+        {chip(phase === 'all', () => setPhase('all'), 'All')}
+        {chip(phase === 'structural', () => setPhase('structural'), 'Structural')}
+        {chip(phase === 'formula', () => setPhase('formula'), 'Formula')}
+      </div>
 
-          <div className="mt-3 space-y-2">
-            {[...groups.entries()].map(([template, group]) => {
-              const isCollapsed = collapsed.has(template)
-              return (
-                <Card key={template} className="overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCollapsed((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(template)) next.delete(template)
-                        else next.add(template)
-                        return next
-                      })
-                    }
-                    className="flex w-full items-center justify-between bg-slate-50 px-4 py-2 text-left"
-                  >
-                    <span className="font-mono text-xs font-medium text-slate-700">
-                      {template}
-                    </span>
-                    <span className="text-xs text-slate-400">
-                      {group.length} · {isCollapsed ? '▸' : '▾'}
-                    </span>
-                  </button>
-                  {!isCollapsed && (
-                    <table className="w-full text-sm">
-                      <tbody>
-                        {group.map((f) => (
-                          <tr
-                            key={f.id}
-                            className="border-t border-slate-100 align-top"
-                          >
-                            <td className="px-4 py-2.5">
-                              <SeverityBadge severity={f.severity} />
-                            </td>
-                            <td className="px-2 py-2.5">
-                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">
-                                {phaseGroup(f.phase)}
-                              </span>
-                            </td>
-                            <td className="whitespace-nowrap px-2 py-2.5 font-mono text-xs text-slate-600">
-                              {f.code}
-                            </td>
-                            <td className="px-2 py-2.5 text-slate-700">
-                              {f.message}
-                              <div className="mt-0.5 font-mono text-[11px] text-slate-400">
-                                {findingLocation(f)}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </Card>
-              )
-            })}
-            {groups.size === 0 && (
-              <p className="py-6 text-center text-sm text-slate-400">
-                No findings match the filter.
-              </p>
-            )}
-          </div>
-        </>
-      )}
+      <div className="mt-3 space-y-2">
+        {[...groups.entries()].map(([template, group]) => {
+          const isCollapsed = collapsed.has(template)
+          return (
+            <Card key={template} className="overflow-hidden">
+              <button
+                type="button"
+                onClick={() =>
+                  setCollapsed((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(template)) next.delete(template)
+                    else next.add(template)
+                    return next
+                  })
+                }
+                className="flex w-full items-center justify-between bg-slate-50 px-4 py-2 text-left"
+              >
+                <span className="font-mono text-xs font-medium text-slate-700">
+                  {template}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {group.length} · {isCollapsed ? '▸' : '▾'}
+                </span>
+              </button>
+              {!isCollapsed && (
+                <table className="w-full text-sm">
+                  <tbody>
+                    {group.map((f) => (
+                      <tr key={f.id} className="border-t border-slate-100 align-top">
+                        <td className="px-4 py-2.5">
+                          <SeverityBadge severity={f.severity} />
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">
+                            {phaseGroup(f.phase)}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2.5 font-mono text-xs text-slate-600">
+                          {f.code}
+                        </td>
+                        <td className="px-2 py-2.5 text-slate-700">
+                          {f.message}
+                          <div className="mt-0.5 font-mono text-[11px] text-slate-400">
+                            {findingLocation(f)}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Card>
+          )
+        })}
+        {groups.size === 0 && (
+          <p className="py-6 text-center text-sm text-slate-400">
+            No findings match the filter.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
 
-// --- artifacts -------------------------------------------------------------
+// --- input data ------------------------------------------------------------
 
-function ArtifactCard({
-  file,
-  title,
-  onDownload,
-}: {
-  file: RunFile
-  title: string
-  onDownload: (f: RunFile) => void
-}) {
-  return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            {title}
-          </div>
-          <div className="mt-1 truncate font-mono text-xs text-slate-700">
-            {file.filename}
-          </div>
-        </div>
-        {file.available ? (
-          <button
-            type="button"
-            onClick={() => onDownload(file)}
-            className="shrink-0 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
-          >
-            Download
-          </button>
-        ) : (
-          <span className="shrink-0 rounded-md bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-400">
-            Unavailable
-          </span>
-        )}
-      </div>
-      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-slate-400">Size</dt>
-        <dd className="font-mono text-slate-600">{formatBytes(file.size_bytes)}</dd>
-        <dt className="text-slate-400">SHA-256</dt>
-        <dd
-          className="truncate font-mono text-slate-500"
-          title={file.checksum}
-        >
-          {file.checksum}
-        </dd>
-      </dl>
-    </Card>
-  )
-}
+function InputData({ detail }: { detail: RunDetailT }) {
+  const { run, filing_indicators } = detail
+  const [facts, setFacts] = useState<FactRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-// --- inputs panel ----------------------------------------------------------
-
-function InputsPanel({
-  detail,
-  onDownload,
-}: {
-  detail: RunDetailT
-  onDownload: (f: RunFile) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const { run, files, filing_indicators } = detail
-  const factFile = files.find((f) => f.role === 'fact_input')
+  useEffect(() => {
+    getRunFacts(run.id)
+      .then(setFacts)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [run.id])
 
   const params: [string, string][] = [
     ['entityID', `${run.entity_lei}.${run.entity_scope}`],
@@ -447,107 +376,126 @@ function InputsPanel({
     ['decimals', String(run.decimals)],
   ]
 
+  // Group facts by template.
+  const groups = new Map<string, FactRow[]>()
+  for (const f of facts ?? []) {
+    const arr = groups.get(f.template_code)
+    if (arr) arr.push(f)
+    else groups.set(f.template_code, [f])
+  }
+
   return (
-    <Card className="overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-5 py-3 text-left"
-      >
-        <span className="text-sm font-semibold text-slate-900">
-          Inputs & traceability
-        </span>
-        <span className="text-xs text-slate-400">{open ? '▾' : '▸'}</span>
-      </button>
-      {open && (
-        <div className="space-y-6 border-t border-slate-100 px-5 py-4">
-          {/* Fact file */}
-          <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Fact file
+    <div className="space-y-6">
+      {/* Derived parameters */}
+      <div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Derived parameters
+        </div>
+        <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm sm:grid-cols-4">
+          {params.map(([k, v]) => (
+            <div key={k}>
+              <dt className="text-xs text-slate-400">{k}</dt>
+              <dd className="font-mono text-xs text-slate-700">{v}</dd>
             </div>
-            {factFile ? (
-              <div className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-2">
-                <span className="truncate font-mono text-xs text-slate-700">
-                  {factFile.filename}
-                </span>
-                {factFile.available ? (
-                  <button
-                    type="button"
-                    onClick={() => onDownload(factFile)}
-                    className="text-xs text-slate-500 hover:text-slate-800 hover:underline"
+          ))}
+        </dl>
+      </div>
+
+      {/* Filing-indicator outcomes */}
+      {filing_indicators && filing_indicators.length > 0 && (
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Filing indicators
+          </div>
+          <Card className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <tbody>
+                {filing_indicators.map((fi) => (
+                  <tr
+                    key={fi.template_code}
+                    className="border-b border-slate-100 last:border-0"
                   >
-                    download
-                  </button>
-                ) : (
-                  <span className="text-xs text-slate-300">unavailable</span>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400">None.</p>
-            )}
-          </div>
-
-          {/* Derived parameters */}
-          <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Derived parameters
-            </div>
-            <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm sm:grid-cols-4">
-              {params.map(([k, v]) => (
-                <div key={k}>
-                  <dt className="text-xs text-slate-400">{k}</dt>
-                  <dd className="font-mono text-xs text-slate-700">{v}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-
-          {/* Filing-indicator outcomes */}
-          <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Filing indicators
-            </div>
-            {filing_indicators && filing_indicators.length > 0 ? (
-              <div className="overflow-x-auto rounded-md border border-slate-200">
-                <table className="w-full text-sm">
-                  <tbody>
-                    {filing_indicators.map((fi) => (
-                      <tr
-                        key={fi.template_code}
-                        className="border-b border-slate-100 last:border-0"
+                    <td className="px-4 py-1.5 font-mono text-xs text-slate-700">
+                      {fi.template_code}
+                    </td>
+                    <td className="px-4 py-1.5">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                          fi.reported
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-slate-100 text-slate-500'
+                        }`}
                       >
-                        <td className="px-3 py-1.5 font-mono text-xs text-slate-700">
-                          {fi.template_code}
-                        </td>
-                        <td className="px-3 py-1.5">
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                              fi.reported
-                                ? 'bg-emerald-50 text-emerald-700'
-                                : 'bg-slate-100 text-slate-500'
-                            }`}
-                          >
-                            {fi.reported ? 'true' : 'false'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-1.5 text-right">
-                          <span className="text-[11px] text-slate-400">
-                            {fi.source === 'declared' ? 'declared' : 'auto'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400">Not available.</p>
-            )}
-          </div>
+                        {fi.reported ? 'true' : 'false'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-1.5 text-right text-[11px] text-slate-400">
+                      {fi.source}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
         </div>
       )}
-    </Card>
+
+      {/* Ingested facts, grouped by template */}
+      <div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Ingested facts{' '}
+          <span className="font-normal normal-case text-slate-400">
+            ({detail.fact_count})
+          </span>
+        </div>
+        <ErrorText>{error}</ErrorText>
+        {facts === null && !error ? (
+          <Skeleton className="h-24" />
+        ) : facts && facts.length === 0 ? (
+          <p className="text-sm text-slate-400">No facts ingested.</p>
+        ) : (
+          <div className="space-y-2">
+            {[...groups.entries()].map(([template, rows]) => (
+              <Card key={template} className="overflow-hidden">
+                <div className="flex items-center justify-between bg-slate-50 px-4 py-2">
+                  <span className="font-mono text-xs font-medium text-slate-700">
+                    {template}
+                  </span>
+                  <span className="text-xs text-slate-400">{rows.length}</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-t border-slate-100 text-left text-xs font-medium text-slate-400">
+                        <th className="px-4 py-2">Row</th>
+                        <th className="px-4 py-2">Column</th>
+                        <th className="px-4 py-2">Value</th>
+                        <th className="px-4 py-2">Source row</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr
+                          key={i}
+                          className="border-t border-slate-100 font-mono text-xs text-slate-600"
+                        >
+                          <td className="px-4 py-1.5">{r.row_code}</td>
+                          <td className="px-4 py-1.5">{r.column_code}</td>
+                          <td className="px-4 py-1.5 text-slate-800">{r.value}</td>
+                          <td className="px-4 py-1.5 text-slate-400">
+                            {r.source_row ?? '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -573,6 +521,7 @@ export default function RunDetail() {
   const [release, setRelease] = useState<Snapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [tab, setTab] = useState<'report' | 'input'>('report')
 
   const load = useCallback(() => {
     getRunDetail(id)
@@ -617,16 +566,30 @@ export default function RunDetail() {
     return (
       <div className="space-y-4">
         <Skeleton className="h-6 w-64" />
-        <Skeleton className="h-28" />
-        <Skeleton className="h-20" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-16" />
       </div>
     )
 
   const { run, files } = detail
-  const outputs = files.filter((f) => f.role === 'package_output')
-  const reports = files.filter((f) => f.role === 'validation_report')
+  const pkg = files.find((f) => f.role === 'package_output')
+  const report = files.find((f) => f.role === 'validation_report')
   const category = config?.category ?? 'Reporting'
   const entityName = entity?.name ?? run.entity_lei
+
+  const tabBtn = (key: 'report' | 'input', label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(key)}
+      className={`border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${
+        tab === key
+          ? 'border-slate-900 text-slate-900'
+          : 'border-transparent text-slate-400 hover:text-slate-600'
+      }`}
+    >
+      {label}
+    </button>
+  )
 
   return (
     <section className="space-y-6">
@@ -647,30 +610,23 @@ export default function RunDetail() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-              {entityName}
-            </h1>
-            <div className="mt-0.5 font-mono text-xs text-slate-400">
-              {run.entity_lei}.{run.entity_scope}
-            </div>
-            <div className="mt-2 text-sm text-slate-600">
               {config?.name ?? 'Suite'}
+            </h1>
+            <div className="mt-1 text-sm text-slate-600">
+              {entityName}
               <span className="mx-2 text-slate-300">·</span>
               <span className="text-slate-500">{run.reference_date}</span>
             </div>
           </div>
-          <div className="text-right text-xs text-slate-500">
+          <div className="text-right">
             <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-              Taxonomy Release
+              Taxonomy
             </div>
             <div className="font-mono text-sm text-slate-800">
               {release?.version_label ?? `#${run.release_id}`}
             </div>
-            <div className="mt-1 font-mono text-xs text-slate-400">
-              {config?.module_code}
-            </div>
           </div>
         </div>
-
         <div className="mt-4 flex flex-wrap gap-2">
           <Chip label="Snapshot" value={run.snapshot_key ?? ''} />
           <Chip label="Adjusted" value={run.adjusted_key ?? ''} />
@@ -680,22 +636,27 @@ export default function RunDetail() {
 
       <StateBanner status={run.status} error={run.error} />
 
-      {run.status === 'failed' && run.failure_details && run.failure_details.length > 0 && (
-        <Card className="border-red-200 bg-red-50 p-4">
-          <ul className="space-y-1 text-xs text-red-700">
-            {run.failure_details.slice(0, 20).map((d, i) => (
-              <li key={i} className="font-mono">
-                {JSON.stringify(d)}
-              </li>
-            ))}
-          </ul>
-        </Card>
+      {/* One clear package download */}
+      {pkg && (
+        <div className="flex items-center gap-3">
+          {pkg.available ? (
+            <button
+              type="button"
+              onClick={() => void handleDownload(pkg)}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+            >
+              Download submission package
+            </button>
+          ) : (
+            <span className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-400">
+              Package unavailable
+            </span>
+          )}
+          <span className="truncate font-mono text-xs text-slate-400">
+            {pkg.filename}
+          </span>
+        </div>
       )}
-
-      {/* Pipeline */}
-      <Card className="p-5">
-        <Pipeline detail={detail} />
-      </Card>
 
       {downloadError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -703,33 +664,32 @@ export default function RunDetail() {
         </div>
       )}
 
-      {/* Artifacts */}
-      {(outputs.length > 0 || reports.length > 0) && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {outputs.map((f) => (
-            <ArtifactCard
-              key={f.id}
-              file={f}
-              title="Submission package"
-              onDownload={handleDownload}
-            />
-          ))}
-          {reports.map((f) => (
-            <ArtifactCard
-              key={f.id}
-              file={f}
-              title="Validation report"
-              onDownload={handleDownload}
-            />
-          ))}
+      {/* Tabs */}
+      <div className="flex gap-6 border-b border-slate-200">
+        {tabBtn('report', 'Validation report')}
+        {tabBtn('input', 'Input data')}
+      </div>
+
+      {tab === 'report' ? (
+        <div className="space-y-6">
+          {report && report.available && (
+            <button
+              type="button"
+              onClick={() => void handleDownload(report)}
+              className="text-xs text-slate-500 underline hover:text-slate-900"
+            >
+              Download full report (HTML)
+            </button>
+          )}
+          <ChecksExecuted
+            checks={detail.structural_checks}
+            formula={detail.formula_summary}
+          />
+          <FindingsDetail findings={detail.findings} />
         </div>
+      ) : (
+        <InputData detail={detail} />
       )}
-
-      {/* Findings */}
-      <FindingsConsole detail={detail} />
-
-      {/* Inputs */}
-      <InputsPanel detail={detail} onDownload={handleDownload} />
     </section>
   )
 }

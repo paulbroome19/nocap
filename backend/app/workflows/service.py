@@ -42,8 +42,10 @@ from app.generation.schemas import (
     PackageMetadata,
 )
 from app.taxonomy import service as taxonomy
-from app.taxonomy.models import SnapshotStatus
+from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
 from app.taxonomy.service import normalize_template_code
+from app.validation import checks as validation_checks
+from app.validation import report as validation_report
 from app.validation import service as validation
 from app.validation.arelle_adapter import ArelleFormulaValidator
 from app.validation.models import Severity, ValidationFinding, ValidationPhase
@@ -603,13 +605,29 @@ def list_findings(db: Session, run_id: int) -> list[ValidationFinding]:
     )
 
 
-def _report_header(run: Run, wf: WorkflowConfig, package_filename: str) -> list[str]:
+def _report_identity(
+    db: Session, run: Run, wf: WorkflowConfig, package_filename: str
+) -> list[tuple[str, str]]:
+    """Run identity label/value pairs for the report header."""
+    entity_name = run.entity_lei
+    if run.entity_id is not None:
+        entity = db.get(Entity, run.entity_id)
+        if entity is not None:
+            entity_name = entity.name
+    snapshot = db.get(TaxonomySnapshot, run.snapshot_id)
+    release_label = snapshot.version_label if snapshot is not None else str(
+        run.release_id
+    )
     return [
-        f"Run #{run.id}  •  {wf.name}  [{wf.module_code}]",
-        f"Entity: {run.entity_lei}.{run.entity_scope}   "
-        f"Reference date: {run.reference_date}",
-        f"Snapshot: {run.snapshot_id} (release {run.release_id})   "
-        f"Package: {package_filename}",
+        ("Run", f"#{run.id}"),
+        ("Suite", f"{wf.name} ({wf.module_code})"),
+        ("Entity", f"{entity_name} · {run.entity_lei}.{run.entity_scope}"),
+        ("Reporting date", run.reference_date.isoformat()),
+        ("Snapshot key", run.snapshot_key or "—"),
+        ("Adjusted key", run.adjusted_key or "—"),
+        ("Version key", run.version_key or "—"),
+        ("Taxonomy release", release_label),
+        ("Package", package_filename),
     ]
 
 
@@ -635,14 +653,17 @@ def _write_validation_report(
     formula-validation phase.
     """
     findings = list_findings(db, run.id)  # ORM rows duck-type the Finding shape
-    report = validation.build_report_text(
-        header_lines=_report_header(run, wf, package_filename), findings=findings
+    report = validation_report.build_report_html(
+        identity=_report_identity(db, run, wf, package_filename),
+        structural_checks=validation_checks.structural_check_results(findings),
+        formula=run.formula_summary,
+        findings=findings,
     )
     facts.upsert_run_file(
         db,
         run_id=run.id,
         role=RunFileRole.validation_report,
-        filename=f"validation_report_run{run.id}.txt",
+        filename=f"validation_report_run{run.id}.html",
         data=report.encode("utf-8"),
         settings=settings,
     )
@@ -868,6 +889,37 @@ def execute_run(
     return run
 
 
+def _build_formula_summary(findings: list[Finding]) -> dict:
+    """Summarise a formula-validation run for the report + UI (truthful only).
+
+    We report whether it executed, the unsatisfied rule ids, and the EBA
+    deactivated-rules note. Total rules evaluated / satisfied are not captured
+    (Arelle isn't configured to emit result counts), so they are omitted rather
+    than fabricated.
+    """
+    deactivated = validation_checks.deactivated_rules()
+    unavailable = [f for f in findings if f.code == "FORMULA_VALIDATION_UNAVAILABLE"]
+    if unavailable:
+        return {
+            "status": "unavailable",
+            "unsatisfied": 0,
+            "unsatisfied_rule_ids": [],
+            "deactivated": deactivated,
+            "note": unavailable[0].message,
+        }
+    rule_ids: list[str] = []
+    for f in findings:
+        if f.code != "FORMULA_VALIDATION_UNAVAILABLE" and f.code not in rule_ids:
+            rule_ids.append(f.code)
+    return {
+        "status": "executed",
+        "unsatisfied": len(rule_ids),
+        "unsatisfied_rule_ids": rule_ids,
+        "deactivated": deactivated,
+        "note": None,
+    }
+
+
 def run_formula_validation_task(run_id: int) -> None:
     """Background: run Arelle formula validation and finalise the run.
 
@@ -898,6 +950,7 @@ def run_formula_validation_task(run_id: int) -> None:
         validator = ArelleFormulaValidator(cache_dir=settings.data_dir / "cache")
         findings = validator.validate(package_path, taxo)  # never raises
 
+        run.formula_summary = _build_formula_summary(findings)
         _append_findings(db, run.id, findings)
         _write_validation_report(
             db, run, wf, outputs[-1].filename, settings=settings
@@ -940,6 +993,11 @@ def count_facts(db: Session, run_id: int) -> int:
     return db.scalar(
         select(func.count()).select_from(Fact).where(Fact.run_id == run_id)
     )
+
+
+def list_facts(db: Session, run_id: int) -> list[Fact]:
+    """The ingested facts for a run (input-data view)."""
+    return facts.list_facts(db, run_id, limit=1_000_000)
 
 
 def read_run_file_path(settings: Settings, run_file: RunFile) -> Path:

@@ -137,6 +137,30 @@ class FilingIndicatorOutcome(BaseModel):
     source: str  # "declared" | "auto"
 
 
+class CheckResultOut(BaseModel):
+    """One structural check category's result (the checks-executed inventory)."""
+
+    key: str
+    label: str
+    status: str  # pass | warning | fail | note
+    errors: int
+    warnings: int
+    infos: int
+
+
+class FactRowOut(BaseModel):
+    """An ingested fact, for the run's input-data view."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    template_code: str
+    row_code: str
+    column_code: str
+    value: str
+    source_sheet: str | None
+    source_row: int | None
+
+
 class RunDetailOut(BaseModel):
     """Run detail: the run, its files, findings, and traceability data."""
 
@@ -145,3 +169,5 @@ class RunDetailOut(BaseModel):
     findings: list[FindingOut]
     fact_count: int
     filing_indicators: list[FilingIndicatorOutcome] | None
+    structural_checks: list[CheckResultOut]
+    formula_summary: dict | None

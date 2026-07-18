@@ -134,6 +134,53 @@ def test_run_detail_traceability(
     assert pkg["available"] is True
 
 
+def test_run_detail_report_and_input_data(
+    client,
+    db_session: Session,
+    ready_snapshot: TaxonomySnapshot,
+    lcr_workflow: WorkflowConfig,
+    entity: Entity,
+    demo_fact_xlsx: bytes,  # 2 facts, C_67.00.a
+) -> None:
+    run = service.create_run(
+        db_session,
+        workflow_id=lcr_workflow.id,
+        snapshot_id=ready_snapshot.id,
+        reference_date=date(2025, 12, 31),
+        entity_id=entity.id,
+    )
+    service.attach_fact_file(
+        db_session, run_id=run.id, filename="f.xlsx", data=demo_fact_xlsx
+    )
+    service.execute_run(db_session, run.id)
+
+    detail = client.get(f"/api/workflows/runs/{run.id}").json()
+
+    # Checks-executed inventory: clean run -> checks pass, entry-point is a note.
+    checks = {c["key"]: c for c in detail["structural_checks"]}
+    assert checks["datapoint_resolution"]["status"] == "pass"
+    assert checks["filing_indicators"]["status"] == "pass"
+    assert checks["entry_point"]["status"] == "note"
+    # Arelle is disabled in tests -> formula never ran.
+    assert detail["formula_summary"] is None
+
+    # The report is now a substantive HTML document.
+    report = next(f for f in detail["files"] if f["role"] == "validation_report")
+    assert report["filename"].endswith(".html")
+    body = client.get(
+        f"/api/workflows/run-files/{report['id']}/download"
+    ).text
+    assert "Structural checks executed" in body
+    assert "Datapoint resolution" in body
+    assert "LCR" in body  # suite identity
+
+    # Input-data view: the ingested facts.
+    rows = client.get(f"/api/workflows/runs/{run.id}/facts").json()
+    assert len(rows) == 2
+    assert {r["template_code"] for r in rows} == {"C_67.00.a"}
+    assert all(r["source_row"] is not None for r in rows)
+
+
 def test_suite_summary_reports_last_run(
     client,
     db_session: Session,
