@@ -53,12 +53,16 @@ export default function RunDetail() {
     load()
   }, [load])
 
-  // Poll while running.
+  // Poll while the run is in progress — structural generation *and* the
+  // background formula-validation phase (which rewrites the report + findings).
+  const inProgress =
+    detail?.run.status === 'running' ||
+    detail?.run.status === 'formula_validation_running'
   useEffect(() => {
-    if (detail?.run.status !== 'running') return
+    if (!inProgress) return
     const t = setInterval(load, 1500)
     return () => clearInterval(t)
-  }, [detail?.run.status, load])
+  }, [inProgress, load])
 
   async function handleDownload(f: RunFile) {
     setDownloadError(null)

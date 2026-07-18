@@ -49,6 +49,7 @@ export type RunStatus =
   | 'created'
   | 'files_attached'
   | 'running'
+  | 'formula_validation_running'
   | 'generated'
   | 'failed_validation'
   | 'failed'
