@@ -181,6 +181,10 @@ class Run(Base):
     # {template_code, reported, source} where source is "declared" | "auto".
     filing_indicators: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    # Formula-validation summary once the formula phase runs: {status, unsatisfied,
+    # unsatisfied_rule_ids, deactivated, note}. Null until the phase runs.
+    formula_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # Real in v2 when auth lands; nullable in v1.
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

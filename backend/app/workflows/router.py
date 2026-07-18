@@ -14,15 +14,18 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.facts.schemas import FactIngestSummary, RunFileOut
 from app.taxonomy.schemas import TemplateInfo
+from app.validation import checks as validation_checks
 from app.validation.schemas import FindingOut
 from app.workflows import service
 from app.workflows.models import RunStatus
 from app.workflows.schemas import (
     CategoryOut,
+    CheckResultOut,
     EntityOut,
     EntityWorkflowConfigOut,
     EntityWorkflowConfigWrite,
     EntityWrite,
+    FactRowOut,
     RunCreate,
     RunDetailOut,
     RunOut,
@@ -231,13 +234,32 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         out.size_bytes = service.run_file_size(settings, f)
         return out
 
+    checks = [
+        CheckResultOut(
+            key=c.key, label=c.label, status=c.status,
+            errors=c.errors, warnings=c.warnings, infos=c.infos,
+        )
+        for c in validation_checks.structural_check_results(findings)
+    ]
     return RunDetailOut(
         run=RunOut.model_validate(run),
         files=[_file_out(f) for f in files],
         findings=[FindingOut.model_validate(f) for f in findings],
         fact_count=service.count_facts(db, run_id),
         filing_indicators=run.filing_indicators,
+        structural_checks=checks,
+        formula_summary=run.formula_summary,
     )
+
+
+@router.get("/runs/{run_id}/facts", response_model=list[FactRowOut])
+def run_facts(run_id: int, db: Session = Depends(get_db)) -> list[FactRowOut]:
+    """The ingested facts for a run (input-data view)."""
+    service.get_run(db, run_id)  # 404 if unknown
+    return [
+        FactRowOut.model_validate(f)
+        for f in service.list_facts(db, run_id)
+    ]
 
 
 @router.post(
