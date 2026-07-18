@@ -10,7 +10,12 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The backend package root (.../backend), used to anchor relative storage paths
+# so the data dir does not depend on the process's current working directory.
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -39,13 +44,27 @@ class Settings(BaseSettings):
 
     # Where uploaded DPM snapshots are stored on disk (one subdir per snapshot
     # id). Snapshots are sealed, reproducible artifacts — keep this on durable
-    # storage in production. Twelve-factor: overridable via DATA_DIR.
-    data_dir: Path = Path("./data")
+    # storage in production. Twelve-factor: overridable via DATA_DIR. Resolved to
+    # an absolute path (relative values anchor to backend/, not the cwd) so the
+    # storage root is stable regardless of where the process is launched.
+    data_dir: Path = _BACKEND_DIR / "data"
+
+    @field_validator("data_dir")
+    @classmethod
+    def _resolve_data_dir(cls, value: Path) -> Path:
+        value = Path(value).expanduser()
+        if not value.is_absolute():
+            value = _BACKEND_DIR / value
+        return value.resolve()
 
     # mdbtools binaries used to convert the EBA DPM Access (.accdb) release into
     # a per-snapshot SQLite file on ingest. Overridable if not on PATH.
     mdb_schema_bin: str = "mdb-schema"
     mdb_export_bin: str = "mdb-export"
+
+    # On startup, reconcile snapshot status with on-disk artifacts. Disabled in
+    # tests (which use their own DB session, not the app's engine).
+    reconcile_snapshots_on_startup: bool = True
 
     @property
     def snapshots_dir(self) -> Path:
