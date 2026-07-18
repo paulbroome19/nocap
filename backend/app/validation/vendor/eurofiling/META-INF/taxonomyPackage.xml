@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<taxonomyPackage xml:lang="en" xmlns="http://xbrl.org/2016/taxonomy-package"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://xbrl.org/2016/taxonomy-package http://www.xbrl.org/2016/taxonomy-package.xsd">
+  <identifier>http://www.eurofiling.info/eu/fr/xbrl</identifier>
+  <name>Eurofiling core (vendored for offline validation)</name>
+  <description>Eurofiling architecture core schemas and function linkbases that the
+    EBA taxonomy imports but does not bundle. Vendored so formula validation runs
+    offline.</description>
+  <version>1.0</version>
+  <publisher>Eurofiling</publisher>
+  <entryPoints>
+  </entryPoints>
+</taxonomyPackage>

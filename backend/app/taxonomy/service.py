@@ -128,6 +128,21 @@ def _sqlite_path(settings: Settings, snapshot_id: int) -> Path:
     return snapshot_dir(settings, snapshot_id) / SQLITE_FILENAME
 
 
+def snapshot_taxonomy_packages(
+    settings: Settings, snapshot_id: int
+) -> list[Path]:
+    """The taxonomy package zips in a snapshot's artifact slot.
+
+    Per the Arelle/version-pinning direction, the XBRL taxonomy package is a
+    per-release artifact loaded per snapshot. Drop the release's package zip(s)
+    into ``{snapshot_dir}/taxonomy/`` (the slot); formula validation uses them.
+    """
+    slot = snapshot_dir(settings, snapshot_id) / "taxonomy"
+    if not slot.is_dir():
+        return []
+    return sorted(slot.glob("*.zip"))
+
+
 def compute_checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 

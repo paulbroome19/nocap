@@ -6,7 +6,7 @@ run, download outputs, and browse run history.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from app.facts.schemas import (
 )
 from app.validation.schemas import FindingOut
 from app.workflows import service
+from app.workflows.models import RunStatus
 from app.workflows.schemas import (
     EntityOut,
     RunCreate,
@@ -114,8 +115,16 @@ async def attach_indicators_params_file(
 
 
 @router.post("/runs/{run_id}/execute", response_model=RunOut)
-def execute_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
-    return RunOut.model_validate(service.execute_run(db, run_id))
+def execute_run(
+    run_id: int,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> RunOut:
+    run = service.execute_run(db, run_id)
+    # Structural is done; if formula validation was queued, run it off-request.
+    if run.status is RunStatus.formula_validation_running:
+        background.add_task(service.run_formula_validation_task, run.id)
+    return RunOut.model_validate(run)
 
 
 @router.get("/run-files/{run_file_id}/download")

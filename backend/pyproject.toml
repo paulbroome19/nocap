@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "NoCap — EBA xBRL-CSV submission platform (backend)"
 requires-python = ">=3.12"
 dependencies = [
+    "arelle-release>=2.42",
     "fastapi>=0.115",
     "openpyxl>=3.1",
     "python-multipart>=0.0.9",

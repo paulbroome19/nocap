@@ -44,6 +44,9 @@ class RunStatus(enum.StrEnum):
     generated = "generated"
     failed_validation = "failed_validation"
     failed = "failed"
+    # Structural validation done + package available; Arelle formula rules run in
+    # the background. Findings are appended and the status finalised when done.
+    formula_validation_running = "formula_validation_running"
 
 
 class WorkflowConfig(Base):
