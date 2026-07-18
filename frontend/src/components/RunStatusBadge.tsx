@@ -7,6 +7,7 @@ const STYLES: Record<RunStatus, string> = {
   generated: 'bg-emerald-100 text-emerald-800 ring-emerald-600/20',
   failed_validation: 'bg-red-100 text-red-800 ring-red-600/20',
   failed: 'bg-red-100 text-red-800 ring-red-600/20',
+  formula_validation_running: 'bg-violet-100 text-violet-800 ring-violet-600/20',
 }
 
 const LABELS: Record<RunStatus, string> = {
@@ -16,6 +17,7 @@ const LABELS: Record<RunStatus, string> = {
   generated: 'generated',
   failed_validation: 'failed validation',
   failed: 'failed',
+  formula_validation_running: 'formula validation…',
 }
 
 export default function RunStatusBadge({ status }: { status: RunStatus }) {
@@ -23,8 +25,8 @@ export default function RunStatusBadge({ status }: { status: RunStatus }) {
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${STYLES[status]}`}
     >
-      {(status === 'running') && (
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+      {(status === 'running' || status === 'formula_validation_running') && (
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
       )}
       {LABELS[status]}
     </span>

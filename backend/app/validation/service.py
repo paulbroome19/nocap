@@ -319,6 +319,7 @@ def validate_package(
     findings += _check_report_package_json(zf, root, present)
     findings += _check_csvs(zf, root, present)
     findings += _check_parameters(zf, root, present, datatypes_present)
+    findings += _check_negative_indicator_csvs(zf, root, present)
 
     # Entry point is derived by pattern, not verified against the published 4.2
     # COREP taxonomy (which wasn't in the provided package). Informational.
@@ -407,6 +408,42 @@ def _check_csvs(
                                 message=f"key column {header[col]!r} is empty for a "
                                 "reported fact", file=name, row=i)
                     )
+    return findings
+
+
+def _check_negative_indicator_csvs(
+    zf: zipfile.ZipFile, root: str, present: set[str]
+) -> list[Finding]:
+    """Filing Rules v5.8 CSV rule 6: a {table}.csv must not be included if its
+    filing indicator is negative."""
+    member = "reports/FilingIndicators.csv"
+    if member not in present:
+        return []
+    rows, _ = _decode_csv(zf.read(f"{root}/{member}"))
+    # templateID (lower) -> reported. templateID codes are DB form (C_73.00.a);
+    # the CSV filename is the lowercased code.
+    reported = {
+        r[0].strip().lower(): r[1].strip().lower() == "true"
+        for r in rows[1:]
+        if len(r) >= 2
+    }
+    findings: list[Finding] = []
+    for name in sorted(present):
+        if not name.startswith("reports/") or not name.endswith(".csv"):
+            continue
+        base = name.split("/")[-1]
+        if base in {"parameters.csv", "FilingIndicators.csv"}:
+            continue
+        template = base[:-4].lower()  # strip .csv
+        if reported.get(template) is False:
+            findings.append(
+                Finding(
+                    severity=Severity.error, phase=_POST,
+                    code="NEGATIVE_INDICATOR_CSV",
+                    message=f"{base} is included but its filing indicator is "
+                    "negative (Filing Rules v5.8 CSV rule 6)", file=base,
+                )
+            )
     return findings
 
 

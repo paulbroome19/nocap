@@ -134,6 +134,13 @@ def test_param_wrongly_included() -> None:
     assert "PARAM_WRONGLY_INCLUDED" in _codes(findings)
 
 
+def test_negative_indicator_csv() -> None:
+    # c_73.00.a.csv is present but its filing indicator is negative (v5.8 rule 6).
+    indicators = [["templateID", "reported"], ["C_73.00.a", "false"]]
+    findings = _validate(clean_members(_csvs(**{"FilingIndicators.csv": indicators})))
+    assert "NEGATIVE_INDICATOR_CSV" in _codes(findings)
+
+
 def test_param_missing() -> None:
     params = [r for r in _PARAMS if r[0] != "baseCurrency"]
     findings = _validate(clean_members(_csvs(**{"parameters.csv": params})))

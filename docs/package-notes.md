@@ -114,11 +114,14 @@ which we know from the taxonomy resolver (datatype code per datapoint).
 (`K_00.04` → `k_00.04.csv`; our `C_73.00.a` → `c_73.00.a.csv`). Header is fixed:
 `datapoint,factValue` **plus** any open/typed dimension columns the table has.
 
-- **datapoint** = `dp{VariableVID}` — literally `dp` + the DPM VariableVID. This
-  is exactly what our taxonomy `resolve(template,row,col)` returns
-  (`datapoint_id`). So a fact `(template,row,col,value)` becomes the CSV row
-  `dp{datapoint_id},{value}` in file `{template}.csv`. This is the join that
-  ties facts → taxonomy → generation.
+- **datapoint** = `dp{VariableID}` — literally `dp` + the DPM
+  `VariableVersion.VariableID` (NOT the `VariableVID`; those are different id
+  spaces). The `VariableID` matches the xBRL taxonomy's datapoint property-group
+  keys (verified against the 4.2 `tab/*.json` — `dp146617` etc.); `VariableVID`
+  does not and Arelle rejects it as `xbrlce:unknownPropertyGroup`. This is what
+  our taxonomy `resolve(template,row,col)` returns as `datapoint_id`, so a fact
+  `(template,row,col,value)` becomes `dp{datapoint_id},{value}` in
+  `{template}.csv` — the join that ties facts → taxonomy → generation.
 - **factValue** = the raw value.
 - **Open/typed dimensions** (extra columns like `qEEA`, `PDT`, `ECA`) appear for
   open/dynamic tables. Our demo uses the `.a` "Total currencies" (closed)
@@ -144,8 +147,9 @@ Both reproduce exactly. Applying it to LCR at 4.2:
 ```
 http://www.eba.europa.eu/eu/fr/xbrl/crr/fws/corep/4.2/mod/corep_lcr_da.json
 ```
-(High confidence on the rule; the COREP taxonomy at 4.2 wasn't in the package to
-confirm the module filename, so treat as derived until verified.)
+**Confirmed** against the 4.2 taxonomy package (`taxo_package_4.2_hotfix.zip`),
+which contains `…/corep/4.2/mod/corep_lcr_da.json` exactly — our generated
+package's entry point resolves and Arelle loads it.
 
 ---
 
@@ -177,3 +181,22 @@ identical to EBA's sample whitespace.
   above (overridable).
 - **output store** (from facts): a callback to persist the zip as a `RunFile`
   with role `package_output`.
+
+---
+
+## Filing Rules v5.8 (vs v5.7) — changes affecting us
+
+Diffed the change history (`EBA Filing Rules v5.8_2026_02_25.pdf`). Only two
+changes touch our package layout / CSV / naming / parameters:
+
+1. **Reporting subject must be uppercase** — "The reporting subject must be
+   written in uppercase when it contains alphabetic character." Applies to the
+   filename's `ReportSubject` and `parameters.csv` `entityID`. We already store
+   LEIs uppercased; generation now also uppercases the subject defensively.
+2. **New xBRL-CSV extra rule 6** — "`{table}.csv` must not be included in the CSV
+   reporting package if its filing indicator is negative." Generation is
+   compliant by construction (a `{table}.csv` is written only for templates that
+   have facts, whose derived indicator is positive); validation adds a
+   `NEGATIVE_INDICATOR_CSV` check to catch override misuse / external packages.
+
+Nothing else in v5.8 affects package structure, naming, CSV rules, or parameters.

@@ -43,6 +43,15 @@ _RECORDS = [
         "message": "v89377_m_8: {D_07.00.a,0260,0030,} <= {D_07.00.a,0240,0030,} "
         "Fails because 74967 <= 61651 is not true.",
     },
+    # an xBRL conformance error (e.g. a wrong CSV format) — surfaced too
+    {
+        "code": "xbrlce:unknownPropertyGroup",
+        "level": "error",
+        "message": {
+            "text": "Table tC_73-00-a unknown property group row 2 column (none) "
+            "group datapoint, url: c_73.00.a.csv"
+        },
+    },
 ]
 
 
@@ -51,7 +60,12 @@ def test_maps_records_to_findings() -> None:
         _RECORDS, deactivated_rules={"v6272_m"}
     )
     by_code = {f.code: f for f in findings}
-    assert set(by_code) == {"v16053_m", "v89377_m"}  # deactivated dropped, dedup
+    # assertions (deactivated dropped, dedup) + the conformance error
+    assert set(by_code) == {"v16053_m", "v89377_m", "xbrlce:unknownPropertyGroup"}
+
+    conf = by_code["xbrlce:unknownPropertyGroup"]
+    assert conf.severity is Severity.error
+    assert conf.file == "c_73.00.a.csv" and conf.row == 2
 
     warn = by_code["v16053_m"]
     assert warn.severity is Severity.warning

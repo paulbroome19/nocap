@@ -80,10 +80,12 @@ _ROWS = {
         (100, 1000, 900, "{C_67.00.a, r0020, c0060, s0010}"),
         (100, 1001, 901, "{C_67.00.a, r0010, c0010, s0010}"),
     ],
-    "Variable": [(900, "fact"), (901, "fact"), (902, "filingindicator")],
+    "Variable": [(9900, "fact"), (9901, "fact"), (902, "filingindicator")],
+    # (VariableVID, VariableID, ...) — VariableID is the xBRL datapoint id and is
+    # deliberately distinct from VariableVID so resolution returns the right one.
     "VariableVersion": [
-        (900, 900, 800, 1, None),
-        (901, 901, 801, 1, None),
+        (900, 9900, 800, 1, None),
+        (901, 9901, 801, 1, None),
     ],
     "Property": [
         (800, 9, 1, "Stock"),  # monetary

@@ -75,38 +75,71 @@ def _parse_location(text: str) -> dict:
     }
 
 
+# Location hints in xBRL conformance messages: "url: c_73.00.a.csv" and "row 2".
+_URL_HINT = re.compile(r"url:\s*([^\s,]+)")
+_ROW_HINT = re.compile(r"\brow (\d+)\b")
+
+
+def _conformance_location(text: str) -> dict:
+    loc = _parse_location(text)
+    if url := _URL_HINT.search(text):
+        loc.setdefault("file", url.group(1))
+    if row := _ROW_HINT.search(text):
+        loc.setdefault("row", int(row.group(1)))
+    return loc
+
+
 def findings_from_arelle_records(
     records: list[dict], *, deactivated_rules: set[str]
 ) -> list[Finding]:
     """Pure mapping: Arelle structured log records → formula-phase findings.
 
-    Only assertion-result records (``message:v…``) become findings. Deactivated
-    rules are dropped. Duplicate rule ids (same rule firing per-fact) collapse to
-    one finding per rule id, keeping the first location.
+    Two kinds become findings:
+    - assertion results (``message:v…``): code = rule id (deactivated dropped;
+      per-fact instances collapsed to one finding per rule);
+    - error-level xBRL **conformance** errors (e.g. ``xbrlce:unknownPropertyGroup``
+      — a wrong CSV format): code = the Arelle code, so genuine generation bugs
+      surface, not just formula failures. (Fatal load errors are handled
+      upstream as an "unavailable" finding.)
     """
     findings: list[Finding] = []
     seen: set[str] = set()
     for record in records:
-        m = _ASSERTION_CODE.match(str(record.get("code", "")))
-        if m is None:
-            continue
-        rule_id = m.group(1)
-        if rule_id in deactivated_rules or rule_id in seen:
-            continue
-        seen.add(rule_id)
-        text = _message_text(record)
-        findings.append(
-            Finding(
-                severity=_LEVEL_TO_SEVERITY.get(
-                    record.get("level", "warning"), Severity.warning
-                ),
-                phase=ValidationPhase.formula,
-                code=rule_id,
-                message=text or f"assertion {rule_id} not satisfied",
-                file="formula",
-                **_parse_location(text),
+        code = str(record.get("code", ""))
+        m = _ASSERTION_CODE.match(code)
+        if m is not None:
+            rule_id = m.group(1)
+            if rule_id in deactivated_rules or rule_id in seen:
+                continue
+            seen.add(rule_id)
+            text = _message_text(record)
+            findings.append(
+                Finding(
+                    severity=_LEVEL_TO_SEVERITY.get(
+                        record.get("level", "warning"), Severity.warning
+                    ),
+                    phase=ValidationPhase.formula,
+                    code=rule_id,
+                    message=text or f"assertion {rule_id} not satisfied",
+                    file="formula",
+                    **_parse_location(text),
+                )
             )
-        )
+        elif (
+            record.get("level") == "error"
+            and code not in _LOAD_ERROR_CODES
+            and ":" in code  # an xBRL conformance code, not a plain log line
+        ):
+            text = _message_text(record)
+            findings.append(
+                Finding(
+                    severity=Severity.error,
+                    phase=ValidationPhase.formula,
+                    code=code,
+                    message=text,
+                    **_conformance_location(text),
+                )
+            )
     return findings
 
 
@@ -126,6 +159,38 @@ def unavailable_finding(reason: str) -> Finding:
         code="FORMULA_VALIDATION_UNAVAILABLE",
         message=f"formula validation unavailable: {reason}",
     )
+
+
+def expand_taxonomy_packages(paths: list[Path], cache_dir: Path) -> list[Path]:
+    """Resolve slot zips to actual taxonomy-package zips Arelle can load.
+
+    The EBA ships a *container* zip (Dictionary + Reporting Frameworks + Severity
+    as inner zips + release notes). A container is expanded to its inner package
+    zips (cached); a zip that is already a taxonomy package is used as-is.
+    """
+    resolved: list[Path] = []
+    for path in paths:
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+        is_package = any(
+            n.endswith("META-INF/taxonomyPackage.xml") for n in names
+        )
+        if is_package:
+            resolved.append(path)
+            continue
+        inner_zips = [n for n in names if n.endswith(".zip")]
+        if not inner_zips:
+            resolved.append(path)  # let Arelle try (and fail clearly)
+            continue
+        dest = cache_dir / f"expanded_{path.stem}"
+        dest.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path) as zf:
+            for name in inner_zips:
+                target = dest / Path(name).name
+                if not target.exists():
+                    target.write_bytes(zf.read(name))
+                resolved.append(target)
+    return resolved
 
 
 def eurofiling_package(cache_dir: Path) -> Path:
@@ -203,7 +268,8 @@ class ArelleFormulaValidator:
             "--internetConnectivity", "offline",
             "--logFile", "logToBuffer",
         ]
-        for pkg in [*taxonomy_packages, eurofiling_package(self._cache_dir)]:
+        packages = expand_taxonomy_packages(taxonomy_packages, self._cache_dir)
+        for pkg in [*packages, eurofiling_package(self._cache_dir)]:
             args += ["--packages", str(pkg)]
         cntlr = CntlrCmdLine.parseAndRun(args)
         try:
