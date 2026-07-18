@@ -1,4 +1,5 @@
 import type { RunStatus } from '../api/workflows'
+import { RUN_STATUS_LABEL as LABELS } from '../lib/status'
 
 const STYLES: Record<RunStatus, string> = {
   created: 'bg-slate-100 text-slate-700 ring-slate-600/20',
@@ -8,16 +9,6 @@ const STYLES: Record<RunStatus, string> = {
   generated: 'bg-emerald-100 text-emerald-800 ring-emerald-600/20',
   failed_validation: 'bg-red-100 text-red-800 ring-red-600/20',
   failed: 'bg-red-100 text-red-800 ring-red-600/20',
-}
-
-const LABELS: Record<RunStatus, string> = {
-  created: 'created',
-  files_attached: 'files attached',
-  running: 'running',
-  formula_validation_running: 'formula validation',
-  generated: 'generated',
-  failed_validation: 'failed validation',
-  failed: 'failed',
 }
 
 const IN_PROGRESS: RunStatus[] = ['running', 'formula_validation_running']

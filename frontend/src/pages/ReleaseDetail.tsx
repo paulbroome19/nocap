@@ -16,6 +16,7 @@ import {
   fileInputClass,
   secondaryBtn,
 } from '../components/ui'
+import { formatDate } from '../lib/format'
 
 const STATUS_STYLES: Record<ArtifactStatus, string> = {
   empty: 'bg-slate-100 text-slate-500 ring-slate-500/20',
@@ -50,11 +51,6 @@ function SlotStatus({ status }: { status: ArtifactStatus }) {
   )
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
-}
 
 export default function ReleaseDetail() {
   const { snapshotId } = useParams()

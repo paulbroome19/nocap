@@ -137,15 +137,16 @@ class FilingIndicatorOutcome(BaseModel):
     source: str  # "declared" | "auto"
 
 
-class CheckResultOut(BaseModel):
-    """One structural check category's result (the checks-executed inventory)."""
+class RegisterRowOut(BaseModel):
+    """One row of the validation rule register (structural or formula)."""
 
-    key: str
-    label: str
-    status: str  # pass | warning | fail | note
-    errors: int
-    warnings: int
-    infos: int
+    id: str
+    rule: str
+    source: str  # structural | formula
+    template: str | None
+    data_evaluated: str
+    result: str  # PASSED | FAILED | WARNING | NOTE
+    detail: str
 
 
 class FactRowOut(BaseModel):
@@ -169,5 +170,5 @@ class RunDetailOut(BaseModel):
     findings: list[FindingOut]
     fact_count: int
     filing_indicators: list[FilingIndicatorOutcome] | None
-    structural_checks: list[CheckResultOut]
+    rule_register: list[RegisterRowOut]
     formula_summary: dict | None

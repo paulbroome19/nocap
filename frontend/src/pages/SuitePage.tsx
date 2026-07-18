@@ -21,6 +21,12 @@ import {
   fileInputClass,
   primaryBtn,
 } from '../components/ui'
+import { formatDate, formatTime } from '../lib/format'
+
+/** Empty instance key → a subtle middot; alignment preserved. */
+function keyCell(value: string | null) {
+  return value ? value : <span className="text-slate-300">·</span>
+}
 
 export default function SuitePage() {
   const { workflowId } = useParams()
@@ -111,6 +117,14 @@ export default function SuitePage() {
 
   const category = config?.category ?? 'Reporting'
   const dateRuns = selectedDate ? (byDate.get(selectedDate) ?? []) : []
+  // Signatures (the three keys) that repeat within the date → show a muted
+  // created-time as a tiebreaker so identical rows are still distinguishable.
+  const sig = (r: Run) => `${r.snapshot_key}|${r.adjusted_key}|${r.version_key}`
+  const dupSigs = new Set(
+    dateRuns
+      .map(sig)
+      .filter((s, _i, all) => all.indexOf(s) !== all.lastIndexOf(s)),
+  )
 
   return (
     <section>
@@ -272,7 +286,7 @@ export default function SuitePage() {
                       : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
-                  {d}
+                  {formatDate(d)}
                   <span
                     className={
                       selectedDate === d ? 'text-slate-300' : 'text-slate-400'
@@ -290,7 +304,6 @@ export default function SuitePage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
-                  <th className="px-4 py-3">Run</th>
                   <th className="px-4 py-3">Snapshot</th>
                   <th className="px-4 py-3">Adjusted</th>
                   <th className="px-4 py-3">Version</th>
@@ -304,20 +317,24 @@ export default function SuitePage() {
                     onClick={() => navigate(`/reporting/runs/${r.id}`)}
                     className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50"
                   >
-                    <td className="px-4 py-3 font-medium text-slate-900">
-                      #{r.id}
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                      {keyCell(r.snapshot_key)}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                      {r.snapshot_key ?? '—'}
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                      {keyCell(r.adjusted_key)}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                      {r.adjusted_key ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                      {r.version_key ?? '—'}
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                      {keyCell(r.version_key)}
                     </td>
                     <td className="px-4 py-3">
-                      <RunStatusBadge status={r.status} />
+                      <div className="flex items-center gap-2">
+                        <RunStatusBadge status={r.status} />
+                        {dupSigs.has(sig(r)) && (
+                          <span className="font-mono text-[11px] text-slate-300">
+                            {formatTime(r.created_at)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

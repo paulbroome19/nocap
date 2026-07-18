@@ -1,9 +1,9 @@
-"""Validation report substance: checks inventory + HTML report content."""
+"""The validation rule register + the HTML report that mirrors it."""
 
 from __future__ import annotations
 
-from app.validation import checks
 from app.validation.models import Severity, ValidationPhase
+from app.validation.register import build_register
 from app.validation.report import build_report_html
 from app.validation.schemas import Finding
 
@@ -14,92 +14,91 @@ def _f(code, severity=Severity.error, phase=ValidationPhase.pre_generation, **lo
     )
 
 
-def test_structural_results_clean_run_all_pass() -> None:
-    results = {r.key: r for r in checks.structural_check_results([])}
-    # Every catalogued check appears and passes on a clean run.
-    assert {c.key for c in checks.STRUCTURAL_CHECKS} <= set(results)
-    assert all(r.status == "pass" for r in results.values())
+def test_register_clean_run_all_passed_with_ids() -> None:
+    rows = build_register([], None)
+    assert all(r.result == "PASSED" for r in rows)
+    ids = {r.id for r in rows}
+    # External Filing-Rule ids where mapped; internal NC-S** otherwise.
+    assert "FR 1.7.1" in ids  # missing filing indicator
+    assert "FR 3.2(b)" in ids  # percentage-as-ratio
+    assert any(i.startswith("NC-S") for i in ids)
+    assert all(r.source == "structural" for r in rows)
 
 
-def test_structural_results_map_codes_to_categories() -> None:
-    findings = [
-        _f("UNRESOLVED_FACT"),
-        _f("DUPLICATE_FACT"),
-        _f("PERCENTAGE_NOT_RATIO", severity=Severity.warning),
-        _f("ENTRY_POINT_UNVERIFIED", severity=Severity.info,
-           phase=ValidationPhase.post_generation),
-        # a formula finding must be ignored by the structural inventory
-        _f("v16053_m", severity=Severity.warning, phase=ValidationPhase.formula),
-    ]
-    results = {r.key: r for r in checks.structural_check_results(findings)}
-    assert results["datapoint_resolution"].status == "fail"
-    assert results["datapoint_resolution"].errors == 1
-    assert results["duplicate_facts"].status == "fail"
-    assert results["datatype_conformance"].status == "warning"
-    assert results["datatype_conformance"].warnings == 1
-    assert results["entry_point"].status == "note"
-    assert results["entry_point"].infos == 1
-    # Filing-indicator check had no findings -> pass.
-    assert results["filing_indicators"].status == "pass"
-
-
-def test_formula_rule_ids_dedupe_and_exclude_marker() -> None:
-    findings = [
-        _f("v16053_m", severity=Severity.warning, phase=ValidationPhase.formula),
-        _f("v16053_m", severity=Severity.warning, phase=ValidationPhase.formula),
-        _f("v89377_m", severity=Severity.error, phase=ValidationPhase.formula),
-        _f("FORMULA_VALIDATION_UNAVAILABLE", severity=Severity.info,
-           phase=ValidationPhase.formula),
-    ]
-    assert checks.formula_rule_ids(findings) == ["v16053_m", "v89377_m"]
-
-
-def test_report_html_carries_identity_checks_and_findings() -> None:
+def test_register_failed_structural_row_carries_location_and_detail() -> None:
     findings = [
         _f("UNRESOLVED_FACT", template_code="C_67.00.a", row_code="9999",
            column_code="0010", file="facts.xlsx", row=5),
-        _f("v89377_m", severity=Severity.error, phase=ValidationPhase.formula),
     ]
-    html = build_report_html(
-        identity=[
-            ("Run", "#42"),
-            ("Suite", "LCR (COREP_LCR_DA)"),
-            ("Entity", "Meridian · 529900X.CON"),
-            ("Taxonomy release", "4.2"),
+    rows = build_register(findings, None)
+    unresolved = [r for r in rows if r.id == "NC-S01"]
+    # One FAILED row (the finding), no separate PASSED row for that rule.
+    assert len(unresolved) == 1
+    row = unresolved[0]
+    assert row.result == "FAILED"
+    assert row.template == "C_67.00.a"
+    assert "C_67.00.a" in row.data_evaluated
+    assert row.detail == "UNRESOLVED_FACT message"
+
+
+def test_register_merges_formula_rules() -> None:
+    formula = {
+        "status": "executed",
+        "loaded": 3,
+        "evaluated": 2,
+        "satisfied": 1,
+        "unsatisfied": 1,
+        "deactivated": ["v6272_m", "v23336_m"],
+        "rules": [
+            {"rule_id": "v16053_m", "assertion_type": "Value Assertion",
+             "satisfied": 0, "not_satisfied": 1, "result": "FAILED",
+             "values": "{C_72.00.a,0010,0010,} 57621 >= 66241",
+             "message": "v16053_m: ... Fails because 57621 >= 66241 is not true."},
+            {"rule_id": "v7681_s", "assertion_type": "Value Assertion",
+             "satisfied": 5, "not_satisfied": 0, "result": "PASSED",
+             "values": None, "message": None},
         ],
-        structural_checks=checks.structural_check_results(findings),
-        formula={
-            "status": "executed",
-            "unsatisfied": 1,
-            "unsatisfied_rule_ids": ["v89377_m"],
-            "deactivated": ["v23336_m", "v6272_m"],
-            "note": None,
-        },
-        findings=findings,
+    }
+    rows = build_register([], formula)
+    formula_rows = [r for r in rows if r.source == "formula"]
+    assert {r.id for r in formula_rows} == {"v16053_m", "v7681_s"}
+    failed = next(r for r in formula_rows if r.id == "v16053_m")
+    assert failed.result == "FAILED"
+    assert failed.template == "C_72.00.a"  # extracted from the cell ref
+    passed = next(r for r in formula_rows if r.id == "v7681_s")
+    assert passed.result == "PASSED"
+    assert "5 satisfied" in passed.detail
+
+
+def test_report_html_mirrors_register_and_formula_note() -> None:
+    findings = [_f("UNRESOLVED_FACT", template_code="C_67.00.a")]
+    formula = {
+        "status": "executed", "loaded": 100, "evaluated": 2,
+        "satisfied": 1, "unsatisfied": 1, "deactivated": ["v6272_m"],
+        "rules": [
+            {"rule_id": "v16053_m", "assertion_type": "Value Assertion",
+             "satisfied": 0, "not_satisfied": 1, "result": "FAILED",
+             "values": "57621 >= 66241", "message": "Fails."},
+        ],
+    }
+    register = build_register(findings, formula)
+    html = build_report_html(
+        identity=[("Run", "#42"), ("Suite", "LCR")],
+        register=register,
+        formula=formula,
     )
-    # Identity
-    assert "#42" in html and "LCR (COREP_LCR_DA)" in html and "4.2" in html
-    # Checks-executed inventory
-    assert "Structural checks executed" in html
-    assert "Datapoint resolution" in html
-    # Verdict
-    assert "Not submittable" in html
-    # Formula section: rule ids + deactivated note
-    assert "Formula validation" in html
-    assert "v89377_m" in html
-    assert "v6272_m" in html and "v23336_m" in html
-    assert "Deactivated rules excluded" in html
-    # Findings detail carries the code + location
-    assert "UNRESOLVED_FACT" in html
-    assert "C_67.00.a" in html
+    assert "Rule register" in html
+    assert "FR 1.7.1" in html  # a structural rule id
+    assert "v16053_m" in html  # a formula rule id
+    assert "UNRESOLVED_FACT message" in html
+    assert "Not submittable" in html  # has a FAILED row
+    assert "100 rules loaded, 2 evaluated" in html
+    assert "v6272_m" in html  # deactivated note
 
 
 def test_report_html_formula_not_run() -> None:
     html = build_report_html(
-        identity=[("Run", "#1")],
-        structural_checks=checks.structural_check_results([]),
-        formula=None,
-        findings=[],
+        identity=[("Run", "#1")], register=build_register([], None), formula=None
     )
     assert "has not run" in html
-    assert "Submittable" in html  # no errors
+    assert "Submittable" in html  # no failed rows

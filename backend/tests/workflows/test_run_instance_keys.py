@@ -156,22 +156,24 @@ def test_run_detail_report_and_input_data(
 
     detail = client.get(f"/api/workflows/runs/{run.id}").json()
 
-    # Checks-executed inventory: clean run -> checks pass, entry-point is a note.
-    checks = {c["key"]: c for c in detail["structural_checks"]}
-    assert checks["datapoint_resolution"]["status"] == "pass"
-    assert checks["filing_indicators"]["status"] == "pass"
-    assert checks["entry_point"]["status"] == "note"
+    # Rule register: clean run -> no FAILED rows (entry-point is an info NOTE).
+    register = detail["rule_register"]
+    assert register and all(r["source"] == "structural" for r in register)
+    assert not any(r["result"] == "FAILED" for r in register)
+    assert {r["result"] for r in register} <= {"PASSED", "NOTE"}
+    ids = {r["id"] for r in register}
+    assert "FR 1.7.1" in ids and any(i.startswith("NC-S") for i in ids)
     # Arelle is disabled in tests -> formula never ran.
     assert detail["formula_summary"] is None
 
-    # The report is now a substantive HTML document.
+    # The report is a substantive HTML document mirroring the register.
     report = next(f for f in detail["files"] if f["role"] == "validation_report")
     assert report["filename"].endswith(".html")
     body = client.get(
         f"/api/workflows/run-files/{report['id']}/download"
     ).text
-    assert "Structural checks executed" in body
-    assert "Datapoint resolution" in body
+    assert "Rule register" in body
+    assert "FR 1.7.1" in body
     assert "LCR" in body  # suite identity
 
     # Input-data view: the ingested facts.

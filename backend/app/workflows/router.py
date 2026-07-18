@@ -14,18 +14,18 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.facts.schemas import FactIngestSummary, RunFileOut
 from app.taxonomy.schemas import TemplateInfo
-from app.validation import checks as validation_checks
+from app.validation import register as validation_register
 from app.validation.schemas import FindingOut
 from app.workflows import service
 from app.workflows.models import RunStatus
 from app.workflows.schemas import (
     CategoryOut,
-    CheckResultOut,
     EntityOut,
     EntityWorkflowConfigOut,
     EntityWorkflowConfigWrite,
     EntityWrite,
     FactRowOut,
+    RegisterRowOut,
     RunCreate,
     RunDetailOut,
     RunOut,
@@ -234,12 +234,12 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         out.size_bytes = service.run_file_size(settings, f)
         return out
 
-    checks = [
-        CheckResultOut(
-            key=c.key, label=c.label, status=c.status,
-            errors=c.errors, warnings=c.warnings, infos=c.infos,
+    register = [
+        RegisterRowOut(
+            id=r.id, rule=r.rule, source=r.source, template=r.template,
+            data_evaluated=r.data_evaluated, result=r.result, detail=r.detail,
         )
-        for c in validation_checks.structural_check_results(findings)
+        for r in validation_register.build_register(findings, run.formula_summary)
     ]
     return RunDetailOut(
         run=RunOut.model_validate(run),
@@ -247,7 +247,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
         findings=[FindingOut.model_validate(f) for f in findings],
         fact_count=service.count_facts(db, run_id),
         filing_indicators=run.filing_indicators,
-        structural_checks=checks,
+        rule_register=register,
         formula_summary=run.formula_summary,
     )
 
