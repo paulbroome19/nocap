@@ -16,7 +16,10 @@ import RegulatorReleases from './pages/RegulatorReleases.tsx'
 import ReleaseWizard from './pages/ReleaseWizard.tsx'
 import ReleaseDetail from './pages/ReleaseDetail.tsx'
 import ReferenceData from './pages/ReferenceData.tsx'
+import EntitySetup from './pages/EntitySetup.tsx'
 import EntityDetail from './pages/EntityDetail.tsx'
+import FilingIndicators from './pages/FilingIndicators.tsx'
+import Parameters from './pages/Parameters.tsx'
 import Settings from './pages/Settings.tsx'
 import SettingsReporting from './pages/SettingsReporting.tsx'
 import SettingsActiveReporting from './pages/SettingsActiveReporting.tsx'
@@ -59,9 +62,12 @@ export const routes: RouteObject[] = [
       // Static "regulators" segment outranks this dynamic release id.
       { path: 'releases/:snapshotId', element: <ReleaseDetail /> },
 
-      // Reference Data.
+      // Reference Data — three entity-anchored tables.
       { path: 'reference', element: <ReferenceData /> },
+      { path: 'reference/entities', element: <EntitySetup /> },
       { path: 'reference/entities/:entityId', element: <EntityDetail /> },
+      { path: 'reference/filing-indicators', element: <FilingIndicators /> },
+      { path: 'reference/parameters', element: <Parameters /> },
 
       // Settings — sections → Reporting → regulator → active-reporting editor.
       { path: 'settings', element: <Settings /> },

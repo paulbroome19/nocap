@@ -46,13 +46,14 @@ export interface TemplateInfo {
   name: string
 }
 
-/** "auto" is represented by the absence of a key. */
-export type Declaration = 'auto' | 'true' | 'false'
+/** A template's filing-indicator declaration. "optional" is the default and is
+ *  represented by the absence of a key. */
+export type Declaration = 'optional' | 'required' | 'not_required'
 
 export interface EntityWorkflowConfig {
   entity_id: number
   workflow_id: number
-  indicator_declarations: Record<string, 'true' | 'false'>
+  indicator_declarations: Record<string, 'required' | 'not_required'>
   base_currency: string | null
   decimals: number | null
 }

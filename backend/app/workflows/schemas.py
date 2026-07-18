@@ -80,7 +80,7 @@ class EntityWorkflowConfigOut(BaseModel):
 
     entity_id: int
     workflow_id: int
-    # template code -> "true" | "false" (Auto is the absence of an entry)
+    # template code -> "required" | "not_required" (Optional is absent)
     indicator_declarations: dict[str, str]
     base_currency: str | None
     decimals: int | None

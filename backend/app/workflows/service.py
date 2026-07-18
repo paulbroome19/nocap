@@ -53,6 +53,17 @@ from app.validation import service as validation
 from app.validation.arelle_adapter import ArelleFormulaValidator, FormulaRun
 from app.validation.models import Severity, ValidationFinding, ValidationPhase
 from app.validation.schemas import Finding
+
+# Filing-indicator declaration vocabulary. Optional = derive from facts
+# (default, stored as absence); Required = positive indicator, run FAILS if no
+# facts; Not required = negative + facts excluded. Lives in its own module so
+# the data migration can share it.
+from app.workflows.declarations import (
+    DECLARATION_NOT_REQUIRED,
+    DECLARATION_OPTIONAL,
+    DECLARATION_REQUIRED,
+)
+from app.workflows.declarations import VALID_DECLARATIONS as _VALID_DECLARATIONS
 from app.workflows.models import (
     WORKFLOW_CATEGORIES,
     Entity,
@@ -65,12 +76,6 @@ from app.workflows.models import (
 logger = logging.getLogger(__name__)
 
 _ATTACHABLE = {RunStatus.created, RunStatus.files_attached}
-
-# Filing-indicator declarations (per template, in an EntityWorkflowConfig).
-DECLARATION_AUTO = "auto"  # report iff the template has resolvable facts (default)
-DECLARATION_TRUE = "true"  # force a positive indicator, even with no facts
-DECLARATION_FALSE = "false"  # declare not-filed; force negative + exclude facts
-_VALID_DECLARATIONS = {DECLARATION_AUTO, DECLARATION_TRUE, DECLARATION_FALSE}
 
 
 def _normalize(code: str) -> str:
@@ -248,15 +253,15 @@ def get_entity_workflow_config(
 
 
 def _clean_declarations(declarations: dict | None) -> dict[str, str]:
-    """Normalise a template→declaration map: canonical codes, drop Auto/invalid.
+    """Normalise a template→declaration map: canonical codes, drop Optional/invalid.
 
-    Only non-Auto declarations are stored (Auto is the absence of an entry), so
-    the map stays compact and templates default to Auto.
+    Only Required / Not required are stored (Optional is the absence of an
+    entry), so the map stays compact and templates default to Optional.
     """
     out: dict[str, str] = {}
     for code, decl in (declarations or {}).items():
         value = str(decl).strip().lower()
-        if value not in _VALID_DECLARATIONS or value == DECLARATION_AUTO:
+        if value not in _VALID_DECLARATIONS or value == DECLARATION_OPTIONAL:
             continue
         try:
             # Declarations are keyed at template level (matching filing
@@ -579,13 +584,13 @@ def _resolve_declaration(
 ) -> bool:
     """Whether a template is reported, honouring its filing-indicator declaration.
 
-    Auto (default): reported iff it has closed, resolvable facts. True: forced
-    positive. False: forced negative.
+    Optional (default): reported iff it has closed, resolvable facts. Required:
+    forced positive. Not required: forced negative.
     """
-    decl = declarations.get(template, DECLARATION_AUTO)
-    if decl == DECLARATION_TRUE:
+    decl = declarations.get(template, DECLARATION_OPTIONAL)
+    if decl == DECLARATION_REQUIRED:
         return True
-    if decl == DECLARATION_FALSE:
+    if decl == DECLARATION_NOT_REQUIRED:
         return False
     return template in closed_with_facts
 
@@ -600,9 +605,10 @@ def _derive_indicators_params(
 
     Filing indicators are per **template** (the EBA regulatory object): a
     module's table variants (``C_73.00.a`` / ``C_73.00.w``) collapse to one
-    ``C_73.00`` indicator, reported per its declaration (Auto/True/False, where
-    Auto = any of its table variants has facts). The template-level template ids
-    are what the taxonomy's assertion preconditions key on (Filing Rule 1.6).
+    ``C_73.00`` indicator, reported per its declaration (Optional/Required/Not
+    required, where Optional = any of its table variants has facts). The
+    template-level ids are what the taxonomy's assertion preconditions key on
+    (Filing Rule 1.6).
     """
     template_ids = {template_of(t) for t in module_templates}
     with_facts = {template_of(t) for t in closed_with_facts}
@@ -651,7 +657,7 @@ def _load_declarations(db: Session, run: Run) -> dict[str, str]:
 def _not_filed_findings(
     fact_rows, module_templates: set[str], declarations: dict[str, str]
 ) -> tuple[set[str], list[Finding]]:
-    """Templates declared not-filed, and a warning per one that has facts.
+    """Templates declared not-required, and a warning per one that has facts.
 
     Works at template level: a declaration on ``C_73.00`` excludes facts for all
     of its table variants. Returns ``(excluded_template_ids, findings)``.
@@ -659,7 +665,7 @@ def _not_filed_findings(
     excluded = {
         tid
         for tid in {template_of(t) for t in module_templates}
-        if declarations.get(tid) == DECLARATION_FALSE
+        if declarations.get(tid) == DECLARATION_NOT_REQUIRED
     }
     findings: list[Finding] = []
     for template in sorted(excluded):
@@ -670,12 +676,42 @@ def _not_filed_findings(
                     severity=Severity.warning,
                     phase=ValidationPhase.pre_generation,
                     code="TEMPLATE_DECLARED_NOT_FILED",
-                    message=f"template {template} declared not-filed; "
+                    message=f"template {template} declared not required; "
                     f"{n} facts excluded",
                     template_code=template,
                 )
             )
     return excluded, findings
+
+
+def _required_empty_findings(
+    module_templates: set[str],
+    declarations: dict[str, str],
+    with_facts: set[str],
+) -> tuple[set[str], list[Finding]]:
+    """Templates declared Required that carry no facts — a blocking error each.
+
+    A Required template must be filed; an empty one fails the run. Returns
+    ``(required_empty_template_ids, findings)`` — the ids let the downstream
+    empty-indicator warning skip these (they are already errored).
+    """
+    required_empty = {
+        tid
+        for tid in {template_of(t) for t in module_templates}
+        if declarations.get(tid) == DECLARATION_REQUIRED and tid not in with_facts
+    }
+    findings = [
+        Finding(
+            severity=Severity.error,
+            phase=ValidationPhase.pre_generation,
+            code="REQUIRED_TEMPLATE_EMPTY",
+            message=f"template {template} is declared required but has no facts; "
+            "a required template must be filed",
+            template_code=template,
+        )
+        for template in sorted(required_empty)
+    ]
+    return required_empty, findings
 
 
 def _safe_validate(what: str, fn) -> list[Finding]:
@@ -956,6 +992,14 @@ def execute_run(
                     closed_with_facts.add(f.template_code)
                     datatypes_present.add(res.datatype_code)
 
+            # A template declared Required but carrying no facts fails the run.
+            required_empty, required_findings = _required_empty_findings(
+                module_templates,
+                declarations,
+                {template_of(t) for t in closed_with_facts},
+            )
+            findings += required_findings
+
             # Indicators & parameters: uploaded override, else derived in-system.
             if ind_files:
                 params = _load_params(settings, ind_files[-1])
@@ -971,7 +1015,7 @@ def execute_run(
             )
 
             # Persist the filing-indicator outcomes for traceability — which
-            # templates report true/false and why (a declaration, or Auto).
+            # templates report and why (an explicit declaration, or derived).
             run.filing_indicators = [
                 {
                     "template_code": fi.template_code,
@@ -980,7 +1024,7 @@ def execute_run(
                         "declared"
                         if ind_files
                         or declarations.get(fi.template_code)
-                        in (DECLARATION_TRUE, DECLARATION_FALSE)
+                        in (DECLARATION_REQUIRED, DECLARATION_NOT_REQUIRED)
                         else "auto"
                     ),
                 }
@@ -1002,6 +1046,7 @@ def execute_run(
                     entity_id=run.entity_lei,
                     ref_period=run.reference_date,
                     template_of=template_of,
+                    required_empty=required_empty,
                 ),
             )
 
