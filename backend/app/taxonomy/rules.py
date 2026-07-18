@@ -122,6 +122,30 @@ def verify_workbook_header(data: bytes) -> tuple:
     return header
 
 
+def verify_workbook_file(data: bytes, filename: str) -> None:
+    """Verify an uploaded validation-rules workbook, or raise plainly.
+
+    Extension + header check, with EBA-website-term messaging so a reporter
+    knows which download to grab.
+    """
+    from pathlib import Path
+
+    if not data:
+        raise ValidationError("The validation-rules workbook is empty.")
+    if Path(filename).suffix.lower() != ".xlsx":
+        raise ValidationError(
+            "This is not the EBA validation-rules workbook. On the EBA "
+            "reporting-frameworks page, download the validation rules for this "
+            "release — an Excel .xlsx — and upload that."
+        )
+    try:
+        verify_workbook_header(data)  # raises on unreadable / wrong columns
+    except ValidationError as exc:
+        raise ValidationError(
+            f"This is not the EBA validation-rules workbook — {exc}"
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Storage + ingestion (background, status-tracked like the DPM conversion)
 # ---------------------------------------------------------------------------

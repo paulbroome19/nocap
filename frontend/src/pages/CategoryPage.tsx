@@ -11,7 +11,7 @@ import {
 } from '../components/ui'
 
 export default function CategoryPage() {
-  const { category = '' } = useParams()
+  const { regulatorCode = '', category = '' } = useParams()
   const name = decodeURIComponent(category)
   const [suites, setSuites] = useState<SuiteSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +29,11 @@ export default function CategoryPage() {
     <section>
       <PageHeader
         title={name}
-        crumbs={[{ label: 'Reporting', to: '/reporting' }, { label: name }]}
+        crumbs={[
+          { label: 'Reporting', to: '/reporting' },
+          { label: regulatorCode, to: `/reporting/${regulatorCode}` },
+          { label: name },
+        ]}
       />
 
       <ErrorText>{error}</ErrorText>

@@ -18,6 +18,7 @@ export interface RunCtx {
   release: Snapshot | null
   facts: FactRow[] | null
   siblings: Run[] // executions of the same instance, newest first
+  regulatorCode: string // the publisher level in the reporting breadcrumb
   reload: () => void
 }
 
@@ -41,12 +42,20 @@ export function instanceSiblings(run: Run, history: Run[]): Run[] {
  * final non-link crumb for a sub-page.
  */
 export function runCrumbs(ctx: RunCtx, leaf?: string): Crumb[] {
-  const { detail, config, id } = ctx
+  const { detail, config, id, regulatorCode } = ctx
   const category = config?.category ?? 'Reporting'
   const instanceLabel = formatDate(detail.run.reference_date)
   const crumbs: Crumb[] = [
     { label: 'Reporting', to: '/reporting' },
-    { label: category, to: `/reporting/${encodeURIComponent(category)}` },
+    ...(regulatorCode
+      ? [{ label: regulatorCode, to: `/reporting/${regulatorCode}` }]
+      : []),
+    {
+      label: category,
+      to: regulatorCode
+        ? `/reporting/${regulatorCode}/${encodeURIComponent(category)}`
+        : '/reporting',
+    },
     {
       label: config?.name ?? 'Suite',
       to: `/reporting/suites/${detail.run.workflow_id}`,

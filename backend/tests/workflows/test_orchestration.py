@@ -207,7 +207,10 @@ def test_execute_without_fact_file_rejected(
 def test_create_run_rejects_non_ready_snapshot(
     db_session: Session, lcr_workflow: WorkflowConfig, entity: Entity
 ) -> None:
+    from app.taxonomy.seed import eba
+
     snap = TaxonomySnapshot(
+        regulator_id=eba(db_session).id,
         version_label="2.0",
         original_filename="x",
         checksum="c" * 64,

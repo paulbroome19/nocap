@@ -14,11 +14,13 @@ import {
   type WorkflowConfig,
 } from '../../api/workflows'
 import { ErrorText, Skeleton } from '../../components/ui'
+import { usePrimaryRegulator } from '../../lib/useRegulator'
 import { instanceSiblings, type RunCtx } from './context'
 
 export default function RunLayout() {
   const { runId } = useParams()
   const id = Number(runId)
+  const regulatorCode = usePrimaryRegulator()?.code ?? ''
   const [detail, setDetail] = useState<RunDetailT | null>(null)
   const [config, setConfig] = useState<WorkflowConfig | null>(null)
   const [entity, setEntity] = useState<Entity | null>(null)
@@ -66,6 +68,8 @@ export default function RunLayout() {
       </div>
     )
 
-  const ctx: RunCtx = { id, detail, config, entity, release, facts, siblings, reload }
+  const ctx: RunCtx = {
+    id, detail, config, entity, release, facts, siblings, regulatorCode, reload,
+  }
   return <Outlet context={ctx} />
 }

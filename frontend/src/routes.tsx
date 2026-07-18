@@ -2,6 +2,7 @@ import type { RouteObject } from 'react-router-dom'
 import { Navigate } from 'react-router-dom'
 import App from './App.tsx'
 import Reporting from './pages/Reporting.tsx'
+import RegulatorReporting from './pages/RegulatorReporting.tsx'
 import CategoryPage from './pages/CategoryPage.tsx'
 import SuitePage from './pages/SuitePage.tsx'
 import RunLayout from './pages/run/RunLayout.tsx'
@@ -10,11 +11,15 @@ import RunInput from './pages/run/RunInput.tsx'
 import RunIndicators from './pages/run/RunIndicators.tsx'
 import RunValidation from './pages/run/RunValidation.tsx'
 import RunPackage from './pages/run/RunPackage.tsx'
-import Releases from './pages/Releases.tsx'
+import Regulators from './pages/Regulators.tsx'
+import RegulatorReleases from './pages/RegulatorReleases.tsx'
+import ReleaseWizard from './pages/ReleaseWizard.tsx'
 import ReleaseDetail from './pages/ReleaseDetail.tsx'
 import ReferenceData from './pages/ReferenceData.tsx'
 import EntityDetail from './pages/EntityDetail.tsx'
 import Settings from './pages/Settings.tsx'
+import SettingsReporting from './pages/SettingsReporting.tsx'
+import SettingsActiveReporting from './pages/SettingsActiveReporting.tsx'
 import NotFound from './pages/NotFound.tsx'
 import ErrorPage from './pages/ErrorPage.tsx'
 import LegacyRedirect from './components/LegacyRedirect.tsx'
@@ -29,9 +34,10 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="/reporting" replace /> },
 
-      // Reporting — categories → suites → runs.
+      // Reporting — regulator → categories → suites → runs.
       { path: 'reporting', element: <Reporting /> },
-      { path: 'reporting/:category', element: <CategoryPage /> },
+      { path: 'reporting/:regulatorCode', element: <RegulatorReporting /> },
+      { path: 'reporting/:regulatorCode/:category', element: <CategoryPage /> },
       { path: 'reporting/suites/:workflowId', element: <SuitePage /> },
       // A run is a submission-instance cover with per-stage sub-pages.
       {
@@ -46,16 +52,24 @@ export const routes: RouteObject[] = [
         ],
       },
 
-      // Taxonomy Releases.
-      { path: 'releases', element: <Releases /> },
+      // Taxonomies — regulator (publisher) → its releases → release detail.
+      { path: 'releases', element: <Regulators /> },
+      { path: 'releases/regulators/:regulatorId', element: <RegulatorReleases /> },
+      { path: 'releases/regulators/:regulatorId/new', element: <ReleaseWizard /> },
+      // Static "regulators" segment outranks this dynamic release id.
       { path: 'releases/:snapshotId', element: <ReleaseDetail /> },
 
       // Reference Data.
       { path: 'reference', element: <ReferenceData /> },
       { path: 'reference/entities/:entityId', element: <EntityDetail /> },
 
-      // Settings.
+      // Settings — sections → Reporting → regulator → active-reporting editor.
       { path: 'settings', element: <Settings /> },
+      { path: 'settings/reporting', element: <SettingsReporting /> },
+      {
+        path: 'settings/reporting/:regulatorCode',
+        element: <SettingsActiveReporting />,
+      },
 
       // --- Legacy paths → new homes (bare + parameterised, all eras) ---------
       { path: 'workflows', element: <Navigate to="/reporting" replace /> },

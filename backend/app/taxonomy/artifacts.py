@@ -282,6 +282,46 @@ def _verify_pdf(data: bytes) -> str | None:
     return None if data[:5] == b"%PDF-" else "not a valid PDF document"
 
 
+def verify_taxonomy_package(data: bytes, filename: str) -> None:
+    """Verify an uploaded taxonomy package, or raise a plain-language error.
+
+    Accepts either a taxonomy package (has ``META-INF/taxonomyPackage.xml``) or
+    an EBA container zip of inner packages. Messages name what was expected in
+    EBA-website terms.
+    """
+    import io
+
+    if not data:
+        raise ValidationError("The taxonomy package file is empty.")
+    if Path(filename).suffix.lower() != ".zip":
+        raise ValidationError(
+            "This is not the EBA taxonomy package. On the EBA "
+            "reporting-frameworks page, download the taxonomy package for this "
+            "release — a .zip — and upload that."
+        )
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            if zf.testzip() is not None:
+                raise ValidationError(
+                    "The taxonomy package zip is corrupt; re-download it from "
+                    "the EBA and upload it again."
+                )
+            names = zf.namelist()
+    except zipfile.BadZipFile as exc:
+        raise ValidationError(
+            "This is not a valid zip. The EBA taxonomy package is a .zip file — "
+            "upload that."
+        ) from exc
+    has_package = any(n.endswith("META-INF/taxonomyPackage.xml") for n in names)
+    has_inner = any(n.lower().endswith(".zip") for n in names)
+    if not (has_package or has_inner):
+        raise ValidationError(
+            "This zip is not the EBA taxonomy package (no taxonomyPackage.xml "
+            "inside). Download the taxonomy package for this framework release "
+            "from the EBA reporting-frameworks page."
+        )
+
+
 def store_artifact(
     db: Session,
     snapshot: TaxonomySnapshot,

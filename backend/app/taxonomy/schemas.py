@@ -15,7 +15,7 @@ from app.taxonomy.models import ArtifactStatus, ReleaseSlot, SnapshotStatus
 
 
 class CapabilitySetOut(BaseModel):
-    """A release's derived capabilities (computed on read, never stored)."""
+    """A release's derived capabilities (backend integrity — not a UI surface)."""
 
     resolve: bool
     generate: bool
@@ -24,20 +24,38 @@ class CapabilitySetOut(BaseModel):
     rule_register: bool
 
 
-class SnapshotOut(BaseModel):
-    """A snapshot (release) as returned by the registry endpoints."""
+class RegulatorOut(BaseModel):
+    """A taxonomy publisher (e.g. the EBA)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    code: str
+    name: str
+
+
+class SnapshotOut(BaseModel):
+    """A release as returned by the registry endpoints.
+
+    ``display_name`` is the business name ("EBA Taxonomy 4.2"); the raw filename
+    and checksum are evidence for the audit-details disclosure, not the primary
+    label.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    regulator_id: int
+    regulator_code: str
+    regulator_name: str
+    display_name: str
     version_label: str
     original_filename: str
     checksum: str
     status: SnapshotStatus
     error: str | None
     uploaded_at: datetime
-    # Populated by endpoints that compute it (registry list / detail); the
-    # run-creation release picker shows a compact indicator from it.
+    # Backend integrity only (run recording); the UI does not render a panel.
     capabilities: CapabilitySetOut | None = None
 
 

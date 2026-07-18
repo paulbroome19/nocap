@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { listRegulators, type Regulator } from '../api/snapshots'
-import { Card, ErrorText, RowLink, TableSkeleton } from '../components/ui'
+import { Card, ErrorText, PageHeader, RowLink, TableSkeleton } from '../components/ui'
 
-export default function Reporting() {
+export default function SettingsReporting() {
   const [regulators, setRegulators] = useState<Regulator[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -14,9 +14,10 @@ export default function Reporting() {
 
   return (
     <section>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight text-slate-900">
-        Reporting
-      </h1>
+      <PageHeader
+        crumbs={[{ label: 'Settings', to: '/settings' }, { label: 'Reporting' }]}
+        title="Reporting"
+      />
 
       <ErrorText>{error}</ErrorText>
 
@@ -27,7 +28,7 @@ export default function Reporting() {
           {(regulators ?? []).map((r) => (
             <RowLink
               key={r.id}
-              to={`/reporting/${r.code}`}
+              to={`/settings/reporting/${r.code}`}
               title={r.name}
               subtitle={r.code}
             />
