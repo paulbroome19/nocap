@@ -1,11 +1,29 @@
-// API client for the workflows (runs) surface.
+// API client for the workflows (reporting) surface.
 
 export interface WorkflowConfig {
   id: number
   name: string
   framework_code: string
   module_code: string
-  active: boolean
+  category: string | null
+  is_active: boolean
+}
+
+export interface RunSummary {
+  id: number
+  reference_date: string
+  status: RunStatus
+  created_at: string
+}
+
+export interface Category {
+  category: string
+  active_count: number
+  last_run: RunSummary | null
+}
+
+export interface SuiteSummary extends WorkflowConfig {
+  last_run: RunSummary | null
 }
 
 export interface Entity {
@@ -79,6 +97,11 @@ export interface Run {
   entity_lei: string
   entity_scope: string
   country: string
+  snapshot_key: string | null
+  adjusted_key: string | null
+  version_key: string | null
+  base_currency: string
+  decimals: number
   status: RunStatus
   error: string | null
   failure_details: Array<Record<string, unknown>> | null
@@ -92,7 +115,6 @@ export interface RunFile {
   filename: string
   checksum: string
   created_at: string
-  /** Whether the stored bytes are present at the storage root. */
   available: boolean
 }
 
@@ -117,21 +139,15 @@ async function getJSON<T>(url: string): Promise<T> {
   return res.json()
 }
 
-async function postJSON<T>(url: string, body?: unknown): Promise<T> {
+async function sendJSON<T>(
+  method: 'POST' | 'PUT' | 'PATCH',
+  url: string,
+  body?: unknown,
+): Promise<T> {
   const res = await fetch(url, {
-    method: 'POST',
+    method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
-  })
-  if (!res.ok) throw new Error(await parseError(res))
-  return res.json()
-}
-
-async function putJSON<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json()
@@ -145,8 +161,30 @@ async function postFile<T>(url: string, file: File): Promise<T> {
   return res.json()
 }
 
-export const listConfigs = () =>
-  getJSON<WorkflowConfig[]>('/api/workflows/configs')
+// --- workflows / categories ------------------------------------------------
+
+export const listConfigs = (includeInactive = false) =>
+  getJSON<WorkflowConfig[]>(
+    `/api/workflows/configs${includeInactive ? '?include_inactive=true' : ''}`,
+  )
+
+export const listCategories = () =>
+  getJSON<Category[]>('/api/workflows/categories')
+
+export const listCategorySuites = (category: string) =>
+  getJSON<SuiteSummary[]>(
+    `/api/workflows/categories/${encodeURIComponent(category)}/suites`,
+  )
+
+export const getConfig = (id: number) =>
+  listConfigs(true).then((cs) => cs.find((c) => c.id === id) ?? null)
+
+export const updateWorkflowSettings = (
+  id: number,
+  body: { category: string | null; is_active: boolean },
+) => sendJSON<WorkflowConfig>('PATCH', `/api/workflows/configs/${id}`, body)
+
+// --- entities & per-workflow config ----------------------------------------
 
 export const listEntities = () => getJSON<Entity[]>('/api/workflows/entities')
 
@@ -154,10 +192,10 @@ export const getEntity = (id: number) =>
   getJSON<Entity>(`/api/workflows/entities/${id}`)
 
 export const createEntity = (body: EntityWrite) =>
-  postJSON<Entity>('/api/workflows/entities', body)
+  sendJSON<Entity>('POST', '/api/workflows/entities', body)
 
 export const updateEntity = (id: number, body: EntityWrite) =>
-  putJSON<Entity>(`/api/workflows/entities/${id}`, body)
+  sendJSON<Entity>('PUT', `/api/workflows/entities/${id}`, body)
 
 export const getEntityWorkflowConfig = (entityId: number, workflowId: number) =>
   getJSON<EntityWorkflowConfig>(
@@ -169,7 +207,8 @@ export const updateEntityWorkflowConfig = (
   workflowId: number,
   body: EntityWorkflowConfigWrite,
 ) =>
-  putJSON<EntityWorkflowConfig>(
+  sendJSON<EntityWorkflowConfig>(
+    'PUT',
     `/api/workflows/entities/${entityId}/configs/${workflowId}`,
     body,
   )
@@ -179,6 +218,8 @@ export const listWorkflowTemplates = (workflowId: number, snapshotId: number) =>
     `/api/workflows/configs/${workflowId}/templates?snapshot_id=${snapshotId}`,
   )
 
+// --- runs ------------------------------------------------------------------
+
 export const runHistory = (workflowId: number) =>
   getJSON<Run[]>(`/api/workflows/configs/${workflowId}/runs`)
 
@@ -187,20 +228,19 @@ export interface CreateRunBody {
   snapshot_id: number
   reference_date: string
   entity_id: number
-  scope?: string
+  snapshot_key?: string
+  adjusted_key?: string
+  version_key?: string
 }
 
 export const createRun = (body: CreateRunBody) =>
-  postJSON<Run>('/api/workflows/runs', body)
+  sendJSON<Run>('POST', '/api/workflows/runs', body)
 
 export const attachFactFile = (runId: number, file: File) =>
   postFile(`/api/workflows/runs/${runId}/fact-file`, file)
 
-export const attachIndicatorsFile = (runId: number, file: File) =>
-  postFile(`/api/workflows/runs/${runId}/indicators-params-file`, file)
-
 export const executeRun = (runId: number) =>
-  postJSON<Run>(`/api/workflows/runs/${runId}/execute`)
+  sendJSON<Run>('POST', `/api/workflows/runs/${runId}/execute`)
 
 export const getRunDetail = (runId: number) =>
   getJSON<RunDetail>(`/api/workflows/runs/${runId}`)

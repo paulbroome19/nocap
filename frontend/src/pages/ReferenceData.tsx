@@ -31,7 +31,6 @@ export default function ReferenceData() {
     <section>
       <PageHeader
         title="Reference Data"
-        subtitle="Reporting entities and their per-workflow configuration."
         actions={
           <button
             type="button"

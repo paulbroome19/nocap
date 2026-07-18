@@ -70,8 +70,7 @@ export default function Releases() {
   return (
     <section>
       <PageHeader
-        title="Releases"
-        subtitle="EBA DPM releases and their taxonomy artifacts. A release is ready to report once its DPM database is ingested."
+        title="Taxonomy Releases"
         actions={
           <button
             type="button"
