@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   getRunDetail,
   runFileDownloadUrl,
@@ -79,7 +79,13 @@ export default function RunDetail() {
 
   return (
     <section>
-      <div className="flex items-center gap-3">
+      <Link
+        to={`/reporting/workflows/${run.workflow_id}`}
+        className="text-xs text-slate-500 transition-colors hover:text-slate-800"
+      >
+        ← Workflow
+      </Link>
+      <div className="mt-1 flex items-center gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">Run #{run.id}</h1>
         <RunStatusBadge status={run.status} />
       </div>

@@ -86,6 +86,39 @@ in every stage.
 - `Fact` — append-only: run id, datapoint/template-row-column reference, value,
   entity, reference date.
 
+### Releases as typed artifact slots (v2)
+
+A release is a `TaxonomySnapshot` (identifier kept as "snapshot" server-side) that
+now acts as a container of typed artifact slots:
+
+- **DPM database** (required) — the release itself; state lives on the snapshot row
+  (ingesting/ready/failed/artifacts_missing). Set at release creation.
+- **Taxonomy package** (required for formula validation) — XBRL package zip(s) stored
+  under `{snapshot_dir}/taxonomy/`, feeding the Arelle path. Uploading replaces the
+  manual file drop.
+- **Filing rules** / **Sample files** (reference) — stored under
+  `{snapshot_dir}/reference/<slot>/`.
+
+`ReleaseArtifact` holds one row per (release, non-DPM slot): slot, filename,
+storage_key, checksum, status, error. The DPM slot is derived from the snapshot, not
+stored here. **Release readiness = every required slot ready = the DPM slot ready.**
+Legacy taxonomy drops are backfilled into their slot on read. See `taxonomy.artifacts`.
+
+### Entity–workflow configuration (v2)
+
+`EntityWorkflowConfig` — reference data keyed unique on (entity, workflow):
+
+- `indicator_declarations` — template code → `"true"` | `"false"` (Auto = absent).
+  **Auto**: report iff the template has facts. **True**: force a positive filing
+  indicator even with no facts. **False**: declare not-filed — force a negative
+  indicator, exclude that template's facts from the package, and warn
+  `template {code} declared not-filed; {n} facts excluded`.
+- `base_currency` / `decimals` — parameter overrides used as run-creation defaults
+  (blank ⇒ EUR / -3); an explicit value on the run still wins.
+
+Consumed by workflow derivation; an uploaded indicators/params file still fully
+overrides derivation.
+
 ## Input contracts
 
 The **fact file is the only required input**. Filing indicators and package

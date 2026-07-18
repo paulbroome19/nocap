@@ -16,6 +16,39 @@ export interface Snapshot {
   uploaded_at: string
 }
 
+// A release is a container of typed artifact slots.
+export type ReleaseSlotKind =
+  | 'dpm_database'
+  | 'taxonomy_package'
+  | 'filing_rules'
+  | 'sample_files'
+
+export type ArtifactStatus =
+  | 'empty'
+  | 'uploaded'
+  | 'verifying'
+  | 'ready'
+  | 'failed'
+
+export interface ReleaseSlot {
+  slot: ReleaseSlotKind
+  label: string
+  requirement: 'required' | 'formula' | 'reference'
+  accept: string[]
+  description: string
+  status: ArtifactStatus
+  filename: string | null
+  checksum: string | null
+  error: string | null
+  uploaded_at: string | null
+}
+
+export interface ReleaseDetail {
+  release: Snapshot
+  ready: boolean
+  slots: ReleaseSlot[]
+}
+
 async function parseError(res: Response): Promise<string> {
   try {
     const body = await res.json()
@@ -44,6 +77,47 @@ export async function reingestSnapshot(id: number): Promise<Snapshot> {
   })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json()
+}
+
+/** A release with its typed artifact slots + readiness. */
+export async function getReleaseDetail(id: number): Promise<ReleaseDetail> {
+  const res = await fetch(`/api/taxonomy/snapshots/${id}/artifacts`)
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
+/** Upload a file into a slot (taxonomy package / filing rules / samples). */
+export function uploadArtifact(
+  id: number,
+  slot: ReleaseSlotKind,
+  file: File,
+  onProgress?: (fraction: number) => void,
+): Promise<ReleaseDetail> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('file', file)
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `/api/taxonomy/snapshots/${id}/artifacts/${slot}`)
+    xhr.upload.onprogress = (e) => {
+      if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText))
+      } else {
+        let message = xhr.statusText
+        try {
+          const body = JSON.parse(xhr.responseText)
+          message = body?.error?.message ?? body?.detail ?? message
+        } catch {
+          /* keep statusText */
+        }
+        reject(new Error(message))
+      }
+    }
+    xhr.onerror = () => reject(new Error('network error during upload'))
+    xhr.send(form)
+  })
 }
 
 /**

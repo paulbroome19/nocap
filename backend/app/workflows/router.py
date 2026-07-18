@@ -17,11 +17,15 @@ from app.facts.schemas import (
     IndicatorsParamsIngestSummary,
     RunFileOut,
 )
+from app.taxonomy.schemas import TemplateInfo
 from app.validation.schemas import FindingOut
 from app.workflows import service
 from app.workflows.models import RunStatus
 from app.workflows.schemas import (
     EntityOut,
+    EntityWorkflowConfigOut,
+    EntityWorkflowConfigWrite,
+    EntityWrite,
     RunCreate,
     RunDetailOut,
     RunOut,
@@ -38,9 +42,91 @@ def list_workflows(db: Session = Depends(get_db)) -> list[WorkflowConfigOut]:
     ]
 
 
+@router.get("/configs/{workflow_id}/templates", response_model=list[TemplateInfo])
+def workflow_templates(
+    workflow_id: int, snapshot_id: int, db: Session = Depends(get_db)
+) -> list[TemplateInfo]:
+    """Templates composing the workflow's module in a release (for config UI)."""
+    return service.list_module_templates(db, workflow_id, snapshot_id)
+
+
 @router.get("/entities", response_model=list[EntityOut])
 def list_entities(db: Session = Depends(get_db)) -> list[EntityOut]:
     return [EntityOut.model_validate(e) for e in service.list_entities(db)]
+
+
+@router.post("/entities", response_model=EntityOut, status_code=201)
+def create_entity(body: EntityWrite, db: Session = Depends(get_db)) -> EntityOut:
+    entity = service.create_entity(
+        db,
+        name=body.name,
+        lei=body.lei,
+        country=body.country,
+        default_scope=body.default_scope,
+    )
+    return EntityOut.model_validate(entity)
+
+
+@router.get("/entities/{entity_id}", response_model=EntityOut)
+def get_entity(entity_id: int, db: Session = Depends(get_db)) -> EntityOut:
+    return EntityOut.model_validate(service.get_entity(db, entity_id))
+
+
+@router.put("/entities/{entity_id}", response_model=EntityOut)
+def update_entity(
+    entity_id: int, body: EntityWrite, db: Session = Depends(get_db)
+) -> EntityOut:
+    entity = service.update_entity(
+        db,
+        entity_id,
+        name=body.name,
+        lei=body.lei,
+        country=body.country,
+        default_scope=body.default_scope,
+    )
+    return EntityOut.model_validate(entity)
+
+
+@router.get(
+    "/entities/{entity_id}/configs/{workflow_id}",
+    response_model=EntityWorkflowConfigOut,
+)
+def get_entity_workflow_config(
+    entity_id: int, workflow_id: int, db: Session = Depends(get_db)
+) -> EntityWorkflowConfigOut:
+    service.get_entity(db, entity_id)  # 404 if unknown
+    service.get_workflow(db, workflow_id)
+    config = service.get_entity_workflow_config(db, entity_id, workflow_id)
+    if config is None:
+        return EntityWorkflowConfigOut(
+            entity_id=entity_id,
+            workflow_id=workflow_id,
+            indicator_declarations={},
+            base_currency=None,
+            decimals=None,
+        )
+    return EntityWorkflowConfigOut.model_validate(config)
+
+
+@router.put(
+    "/entities/{entity_id}/configs/{workflow_id}",
+    response_model=EntityWorkflowConfigOut,
+)
+def update_entity_workflow_config(
+    entity_id: int,
+    workflow_id: int,
+    body: EntityWorkflowConfigWrite,
+    db: Session = Depends(get_db),
+) -> EntityWorkflowConfigOut:
+    config = service.upsert_entity_workflow_config(
+        db,
+        entity_id=entity_id,
+        workflow_id=workflow_id,
+        indicator_declarations=body.indicator_declarations,
+        base_currency=body.base_currency,
+        decimals=body.decimals,
+    )
+    return EntityWorkflowConfigOut.model_validate(config)
 
 
 @router.get("/configs/{workflow_id}/runs", response_model=list[RunOut])

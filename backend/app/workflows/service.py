@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.facts import service as facts
 from app.facts.models import RunFile, RunFileRole
 from app.facts.parsers import default_indicators_params_parser
@@ -43,11 +43,23 @@ from app.validation import service as validation
 from app.validation.arelle_adapter import ArelleFormulaValidator
 from app.validation.models import Severity, ValidationFinding, ValidationPhase
 from app.validation.schemas import Finding
-from app.workflows.models import Entity, Run, RunStatus, WorkflowConfig
+from app.workflows.models import (
+    Entity,
+    EntityWorkflowConfig,
+    Run,
+    RunStatus,
+    WorkflowConfig,
+)
 
 logger = logging.getLogger(__name__)
 
 _ATTACHABLE = {RunStatus.created, RunStatus.files_attached}
+
+# Filing-indicator declarations (per template, in an EntityWorkflowConfig).
+DECLARATION_AUTO = "auto"  # report iff the template has resolvable facts (default)
+DECLARATION_TRUE = "true"  # force a positive indicator, even with no facts
+DECLARATION_FALSE = "false"  # declare not-filed; force negative + exclude facts
+_VALID_DECLARATIONS = {DECLARATION_AUTO, DECLARATION_TRUE, DECLARATION_FALSE}
 
 
 def _normalize(code: str) -> str:
@@ -96,6 +108,140 @@ def get_entity(db: Session, entity_id: int) -> Entity:
     return entity
 
 
+def _clean_entity_fields(
+    *, name: str, lei: str, country: str, default_scope: str
+) -> dict:
+    scope = default_scope.strip().upper()
+    if scope not in {"IND", "CON"}:
+        raise ValidationError("default_scope must be IND or CON")
+    country = country.strip().upper()
+    if len(country) != 2 or not country.isalpha():
+        raise ValidationError("country must be a 2-letter ISO code")
+    if not name.strip():
+        raise ValidationError("name is required")
+    return {
+        "name": name.strip(),
+        "lei": _validate_lei(lei),
+        "country": country,
+        "default_scope": scope,
+    }
+
+
+def create_entity(
+    db: Session, *, name: str, lei: str, country: str, default_scope: str
+) -> Entity:
+    fields = _clean_entity_fields(
+        name=name, lei=lei, country=country, default_scope=default_scope
+    )
+    if db.scalar(select(Entity).where(Entity.lei == fields["lei"])):
+        raise ConflictError(f"an entity with LEI {fields['lei']} already exists")
+    entity = Entity(**fields)
+    db.add(entity)
+    db.commit()
+    db.refresh(entity)
+    return entity
+
+
+def update_entity(
+    db: Session,
+    entity_id: int,
+    *,
+    name: str,
+    lei: str,
+    country: str,
+    default_scope: str,
+) -> Entity:
+    entity = get_entity(db, entity_id)
+    fields = _clean_entity_fields(
+        name=name, lei=lei, country=country, default_scope=default_scope
+    )
+    clash = db.scalar(
+        select(Entity).where(Entity.lei == fields["lei"], Entity.id != entity.id)
+    )
+    if clash is not None:
+        raise ConflictError(f"an entity with LEI {fields['lei']} already exists")
+    for key, value in fields.items():
+        setattr(entity, key, value)
+    db.commit()
+    db.refresh(entity)
+    return entity
+
+
+# --- per-(entity, workflow) configuration ----------------------------------
+
+
+def get_entity_workflow_config(
+    db: Session, entity_id: int, workflow_id: int
+) -> EntityWorkflowConfig | None:
+    return db.scalar(
+        select(EntityWorkflowConfig).where(
+            EntityWorkflowConfig.entity_id == entity_id,
+            EntityWorkflowConfig.workflow_id == workflow_id,
+        )
+    )
+
+
+def _clean_declarations(declarations: dict | None) -> dict[str, str]:
+    """Normalise a template→declaration map: canonical codes, drop Auto/invalid.
+
+    Only non-Auto declarations are stored (Auto is the absence of an entry), so
+    the map stays compact and templates default to Auto.
+    """
+    out: dict[str, str] = {}
+    for code, decl in (declarations or {}).items():
+        value = str(decl).strip().lower()
+        if value not in _VALID_DECLARATIONS or value == DECLARATION_AUTO:
+            continue
+        try:
+            out[_normalize(code)] = value
+        except ValueError:
+            continue
+    return out
+
+
+def upsert_entity_workflow_config(
+    db: Session,
+    *,
+    entity_id: int,
+    workflow_id: int,
+    indicator_declarations: dict | None,
+    base_currency: str | None,
+    decimals: int | None,
+) -> EntityWorkflowConfig:
+    get_entity(db, entity_id)  # 404 if unknown
+    get_workflow(db, workflow_id)
+    currency = (base_currency or "").strip().upper() or None
+    if currency is not None and (len(currency) != 3 or not currency.isalpha()):
+        raise ValidationError("base_currency must be a 3-letter ISO code")
+
+    config = get_entity_workflow_config(db, entity_id, workflow_id)
+    if config is None:
+        config = EntityWorkflowConfig(
+            entity_id=entity_id, workflow_id=workflow_id
+        )
+        db.add(config)
+    config.indicator_declarations = _clean_declarations(indicator_declarations)
+    config.base_currency = currency
+    config.decimals = decimals
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def list_module_templates(
+    db: Session, workflow_id: int, snapshot_id: int
+) -> list:
+    """Templates composing a workflow's module in a release (for the config UI).
+
+    Returns the taxonomy ``TemplateInfo`` list (code + name). Requires a ready
+    release so the module can be resolved.
+    """
+    wf = get_workflow(db, workflow_id)
+    snapshot = taxonomy.get_snapshot(db, snapshot_id)
+    with taxonomy.open_lookup(snapshot) as lk:
+        return lk.list_templates(wf.module_code)
+
+
 def create_run(
     db: Session,
     *,
@@ -132,6 +278,14 @@ def create_run(
     run_scope = (scope or entity.default_scope).strip().upper()
     if run_scope not in {"IND", "CON"}:
         raise ValidationError("scope must be IND or CON")
+
+    # Parameter defaults come from the entity+workflow config when the caller
+    # doesn't specify them (blank ⇒ EUR / -3); the run still owns the values.
+    ewc = get_entity_workflow_config(db, entity.id, wf.id)
+    if base_currency is None and ewc is not None and ewc.base_currency:
+        base_currency = ewc.base_currency
+    if decimals is None and ewc is not None and ewc.decimals is not None:
+        decimals = ewc.decimals
     currency = (base_currency or "EUR").strip().upper()
     if len(currency) != 3 or not currency.isalpha():
         raise ValidationError("base_currency must be a 3-letter ISO code")
@@ -258,19 +412,41 @@ def _load_params(settings: Settings, run_file: RunFile) -> IndicatorsParams:
     return result.params
 
 
+def _resolve_declaration(
+    template: str, declarations: dict[str, str], closed_with_facts: set[str]
+) -> bool:
+    """Whether a template is reported, honouring its filing-indicator declaration.
+
+    Auto (default): reported iff it has closed, resolvable facts. True: forced
+    positive. False: forced negative.
+    """
+    decl = declarations.get(template, DECLARATION_AUTO)
+    if decl == DECLARATION_TRUE:
+        return True
+    if decl == DECLARATION_FALSE:
+        return False
+    return template in closed_with_facts
+
+
 def _derive_indicators_params(
-    run: Run, module_templates: set[str], closed_with_facts: set[str]
+    run: Run,
+    module_templates: set[str],
+    closed_with_facts: set[str],
+    declarations: dict[str, str],
 ) -> IndicatorsParams:
     """Derive indicators & parameters in-system from the run + its facts.
 
-    Filing indicators: every module template, reported iff it has (closed,
-    resolvable) facts. Parameters: entity + reference date + base currency +
-    decimals from the run.
+    Filing indicators: every module template, reported per its declaration
+    (Auto/True/False — see ``_resolve_declaration``). Parameters: entity +
+    reference date + base currency + decimals from the run.
     """
     return IndicatorsParams(
         filing_indicators=[
             FilingIndicator(
-                template_code=template, reported=template in closed_with_facts
+                template_code=template,
+                reported=_resolve_declaration(
+                    template, declarations, closed_with_facts
+                ),
             )
             for template in sorted(module_templates)
         ],
@@ -279,6 +455,42 @@ def _derive_indicators_params(
         base_currency=run.base_currency,
         decimals=run.decimals,
     )
+
+
+def _load_declarations(db: Session, run: Run) -> dict[str, str]:
+    """The entity+workflow filing-indicator declarations for a run (canonical)."""
+    if run.entity_id is None:
+        return {}
+    ewc = get_entity_workflow_config(db, run.entity_id, run.workflow_id)
+    return dict(ewc.indicator_declarations) if ewc else {}
+
+
+def _not_filed_findings(
+    fact_rows, module_templates: set[str], declarations: dict[str, str]
+) -> tuple[set[str], list[Finding]]:
+    """Templates declared not-filed, and a warning per one that has facts.
+
+    Returns ``(excluded_templates, findings)``. Any facts for an excluded
+    template are dropped from the package; the warning records how many.
+    """
+    excluded = {
+        t for t in module_templates if declarations.get(t) == DECLARATION_FALSE
+    }
+    findings: list[Finding] = []
+    for template in sorted(excluded):
+        n = sum(1 for f in fact_rows if f.template_code == template)
+        if n:
+            findings.append(
+                Finding(
+                    severity=Severity.warning,
+                    phase=ValidationPhase.pre_generation,
+                    code="TEMPLATE_DECLARED_NOT_FILED",
+                    message=f"template {template} declared not-filed; "
+                    f"{n} facts excluded",
+                    template_code=template,
+                )
+            )
+    return excluded, findings
 
 
 def _safe_validate(what: str, fn) -> list[Finding]:
@@ -421,11 +633,23 @@ def execute_run(
             def resolve(t, r, c):
                 return lk.resolve(t, r, c, release_id=run.release_id)
 
+            # Filing-indicator declarations (Auto/True/False) for this entity +
+            # workflow. Templates declared not-filed (False) are excluded from
+            # the package, with a warning per template that had facts.
+            declarations = _load_declarations(db, run)
+            excluded_templates, exclusion_findings = _not_filed_findings(
+                fact_rows, module_templates, declarations
+            )
+            findings += exclusion_findings
+            active_facts = [
+                f for f in fact_rows if f.template_code not in excluded_templates
+            ]
+
             # Which closed templates actually have resolvable facts, and their
             # datatypes (drives derived filing indicators + parameters).
             closed_with_facts: set[str] = set()
             datatypes_present: set[str] = set()
-            for f in fact_rows:
+            for f in active_facts:
                 if f.template_code in open_templates:
                     continue
                 res = resolve(f.template_code, f.row_code, f.column_code)
@@ -438,14 +662,16 @@ def execute_run(
                 params = _load_params(settings, ind_files[-1])
             else:
                 params = _derive_indicators_params(
-                    run, module_templates, closed_with_facts
+                    run, module_templates, closed_with_facts, declarations
                 )
 
-            # Phase 1 — pre-generation checks on the facts.
+            # Phase 1 — pre-generation checks on the facts (excluding not-filed
+            # templates, so a declared-not-filed template with facts doesn't trip
+            # the missing-indicator rule).
             findings += _safe_validate(
                 "facts",
                 lambda: validation.validate_facts(
-                    facts=fact_rows,
+                    facts=active_facts,
                     resolve=resolve,
                     module_templates=module_templates,
                     open_templates=open_templates,
@@ -476,7 +702,8 @@ def execute_run(
                 ],
             )
             # Exclude open-table facts (guarded as findings) so we never emit a
-            # malformed CSV; lenient build skips unresolved facts too.
+            # malformed CSV; lenient build skips unresolved facts too. Not-filed
+            # templates are already gone from active_facts.
             generatable = [
                 FactInput(
                     template_code=f.template_code,
@@ -484,7 +711,7 @@ def execute_run(
                     column_code=f.column_code,
                     value=f.value,
                 )
-                for f in fact_rows
+                for f in active_facts
                 if f.template_code not in open_templates
             ]
             package = generation.build_package(

@@ -11,11 +11,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.taxonomy.models import SnapshotStatus
+from app.taxonomy.models import ArtifactStatus, ReleaseSlot, SnapshotStatus
 
 
 class SnapshotOut(BaseModel):
-    """A snapshot as returned by the registry endpoints."""
+    """A snapshot (release) as returned by the registry endpoints."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -26,6 +26,29 @@ class SnapshotOut(BaseModel):
     status: SnapshotStatus
     error: str | None
     uploaded_at: datetime
+
+
+class ReleaseSlotOut(BaseModel):
+    """One typed artifact slot on a release, with its current occupant."""
+
+    slot: ReleaseSlot
+    label: str
+    requirement: str  # required | formula | reference
+    accept: list[str]
+    description: str
+    status: ArtifactStatus
+    filename: str | None
+    checksum: str | None
+    error: str | None
+    uploaded_at: datetime | None
+
+
+class ReleaseDetailOut(BaseModel):
+    """A release plus its readiness and typed artifact slots."""
+
+    release: SnapshotOut
+    ready: bool
+    slots: list[ReleaseSlotOut]
 
 
 class TemplateInfo(BaseModel):
