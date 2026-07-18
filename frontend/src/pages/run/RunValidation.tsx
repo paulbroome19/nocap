@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { downloadRunFile, type RegisterRow } from '../../api/workflows'
 import VerdictBanner from '../../components/VerdictBanner'
-import { Card, EmptyState, PageHeader } from '../../components/ui'
+import { Card, EmptyState, PageHeader, Select } from '../../components/ui'
 import { runCrumbs, useRun } from './context'
 
 type Bucket = 'blocking' | 'failure' | 'warning' | 'passed' | 'other'
@@ -274,18 +274,14 @@ export default function RunValidation() {
         {chip('warning', 'Warnings', byBucket.warning.length)}
         {chip('passed', 'Passed', byBucket.passed.length)}
         {templates.length > 0 && (
-          <select
-            value={template}
-            onChange={(e) => setTemplate(e.target.value)}
-            className="ml-auto rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-          >
+          <Select value={template} onChange={setTemplate} className="ml-auto w-48">
             <option value="all">All templates</option>
             {templates.map((t) => (
               <option key={t} value={t as string}>
                 {t}
               </option>
             ))}
-          </select>
+          </Select>
         )}
       </div>
 

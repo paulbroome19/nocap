@@ -14,9 +14,9 @@ import {
   ErrorText,
   Loading,
   PageHeader,
-  fileInputClass,
   secondaryBtn,
 } from '../components/ui'
+import UploadZone from '../components/UploadZone'
 import { formatDate } from '../lib/format'
 
 const STATUS_STYLES: Record<ArtifactStatus, string> = {
@@ -221,17 +221,16 @@ export default function ReleaseDetail() {
               </p>
             )
           ) : (
-            <label className="flex flex-col gap-1">
-              <input
-                type="file"
+            <div className="flex flex-col gap-1">
+              <UploadZone
                 accept={slot.accept.join(',')}
-                disabled={isBusy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
+                hint={slot.accept.join(' · ').replace(/\./g, '').toUpperCase()}
+                onFile={(f) => {
                   if (f) void handleUpload(slot, f)
-                  e.target.value = ''
                 }}
-                className={fileInputClass}
+                file={null}
+                disabled={isBusy}
+                compact
               />
               {isBusy && progress !== null && (
                 <span className="text-xs text-slate-500">
@@ -243,7 +242,7 @@ export default function ReleaseDetail() {
                   {slotError[slot.slot]}
                 </span>
               )}
-            </label>
+            </div>
           )}
         </div>
       </Card>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Entity, EntityWrite } from '../api/workflows'
-import { ErrorText, fieldClass, primaryBtn, secondaryBtn } from './ui'
+import { ErrorText, Select, fieldClass, primaryBtn, secondaryBtn } from './ui'
 
 export default function EntityForm({
   initial,
@@ -77,14 +77,10 @@ export default function EntityForm({
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">Scope</span>
-            <select
-              className={fieldClass}
-              value={scope}
-              onChange={(e) => setScope(e.target.value)}
-            >
+            <Select value={scope} onChange={setScope}>
               <option value="CON">Consolidated (CON)</option>
               <option value="IND">Individual (IND)</option>
-            </select>
+            </Select>
           </label>
         </div>
       </div>

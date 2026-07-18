@@ -13,12 +13,13 @@ import {
   type WorkflowConfig,
 } from '../api/workflows'
 import RunStatusBadge from '../components/RunStatusBadge'
+import UploadZone from '../components/UploadZone'
 import {
   Card,
   ErrorText,
   PageHeader,
+  Select,
   fieldClass,
-  fileInputClass,
   primaryBtn,
 } from '../components/ui'
 import { formatDate, formatTime } from '../lib/format'
@@ -133,15 +134,23 @@ export default function SuitePage() {
   }
 
   const category = config?.category ?? 'Reporting'
-  const dateRuns = selectedDate ? (byDate.get(selectedDate) ?? []) : []
-  // Signatures (the three keys) that repeat within the date → show a muted
-  // created-time as a tiebreaker so identical rows are still distinguishable.
-  const sig = (r: Run) => `${r.snapshot_key}|${r.adjusted_key}|${r.version_key}`
-  const dupSigs = new Set(
-    dateRuns
-      .map(sig)
-      .filter((s, _i, all) => all.indexOf(s) !== all.lastIndexOf(s)),
-  )
+  // Group a date's runs into submission instances (by the three keys); each
+  // instance shows its latest execution, with earlier ones counted. Re-executed
+  // instances collapse to one row (latest prominent) rather than repeating.
+  const instances = useMemo(() => {
+    const dateRuns = selectedDate ? (byDate.get(selectedDate) ?? []) : []
+    const m = new Map<string, Run[]>()
+    for (const r of dateRuns) {
+      const sig = `${r.snapshot_key}|${r.adjusted_key}|${r.version_key}`
+      const arr = m.get(sig)
+      if (arr) arr.push(r)
+      else m.set(sig, [r])
+    }
+    return [...m.values()].map((runs) => {
+      const sorted = [...runs].sort((a, b) => b.id - a.id)
+      return { latest: sorted[0], count: runs.length }
+    })
+  }, [byDate, selectedDate])
 
   return (
     <section>
@@ -180,12 +189,9 @@ export default function SuitePage() {
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-slate-600">Entity</span>
-                <select
-                  className={fieldClass}
+                <Select
                   value={entityId}
-                  onChange={(e) =>
-                    setEntityId(e.target.value === '' ? '' : Number(e.target.value))
-                  }
+                  onChange={(v) => setEntityId(v === '' ? '' : Number(v))}
                 >
                   <option value="">Select…</option>
                   {entities.map((en) => (
@@ -193,7 +199,7 @@ export default function SuitePage() {
                       {en.name} · {en.lei}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
             </div>
 
@@ -236,14 +242,9 @@ export default function SuitePage() {
                   <span className="text-xs font-medium text-slate-600">
                     Taxonomy Release
                   </span>
-                  <select
-                    className={fieldClass}
+                  <Select
                     value={releaseId}
-                    onChange={(e) =>
-                      setReleaseId(
-                        e.target.value === '' ? '' : Number(e.target.value),
-                      )
-                    }
+                    onChange={(v) => setReleaseId(v === '' ? '' : Number(v))}
                   >
                     <option value="">Select…</option>
                     {releases.map((s) => (
@@ -252,19 +253,20 @@ export default function SuitePage() {
                         {releaseCaps(s)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-xs font-medium text-slate-600">
-                    Fact file (XLSX)
+                    Fact file
                   </span>
-                  <input
-                    type="file"
+                  <UploadZone
                     accept=".xlsx"
-                    className={fileInputClass}
-                    onChange={(e) => setFactFile(e.target.files?.[0] ?? null)}
+                    onFile={setFactFile}
+                    file={factFile}
+                    hint="XLSX"
+                    compact
                   />
-                </label>
+                </div>
               </div>
             </div>
 
@@ -321,38 +323,44 @@ export default function SuitePage() {
           <Card className="min-w-0 flex-1 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
-                  <th className="px-4 py-3">Snapshot</th>
-                  <th className="px-4 py-3">Adjusted</th>
-                  <th className="px-4 py-3">Version</th>
-                  <th className="px-4 py-3">Status</th>
+                <tr className="border-b border-slate-200 text-left text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                  <th className="px-4 py-3 font-medium">Snapshot</th>
+                  <th className="px-4 py-3 font-medium">Adjusted</th>
+                  <th className="px-4 py-3 font-medium">Version</th>
+                  <th className="px-4 py-3 font-medium">Executions</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {dateRuns.map((r) => (
+                {instances.map(({ latest, count }) => (
                   <tr
-                    key={r.id}
-                    onClick={() => navigate(`/reporting/runs/${r.id}`)}
+                    key={latest.id}
+                    onClick={() => navigate(`/reporting/runs/${latest.id}`)}
                     className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50"
                   >
                     <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                      {keyCell(r.snapshot_key)}
+                      {keyCell(latest.snapshot_key)}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                      {keyCell(r.adjusted_key)}
+                      {keyCell(latest.adjusted_key)}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                      {keyCell(r.version_key)}
+                      {keyCell(latest.version_key)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <RunStatusBadge status={r.status} />
-                        {dupSigs.has(sig(r)) && (
-                          <span className="font-mono text-[11px] text-slate-300">
-                            {formatTime(r.created_at)}
+                      {count > 1 ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-600">
+                          {count}×
+                          <span className="font-mono text-slate-400">
+                            {formatTime(latest.created_at)}
                           </span>
-                        )}
-                      </div>
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-300">1</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <RunStatusBadge status={latest.status} />
                     </td>
                   </tr>
                 ))}
