@@ -24,13 +24,20 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
 from app.core.errors import ConflictError, NotFoundError, ValidationError
-from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
+from app.taxonomy.models import (
+    ArtifactStatus,
+    ReleaseArtifact,
+    ReleaseSlot,
+    SnapshotStatus,
+    TaxonomySnapshot,
+    ValidationRule,
+)
 from app.taxonomy.schemas import (
     DatapointResolution,
     ModuleMetadata,
@@ -359,6 +366,186 @@ def ingest_snapshot_task(snapshot_id: int) -> None:
             logger.warning("ingest task: snapshot id=%s not found", snapshot_id)
             return
         ingest_snapshot(db, snapshot, settings=settings)
+
+
+# ---------------------------------------------------------------------------
+# All-or-nothing release creation (the wizard) + deletion
+# ---------------------------------------------------------------------------
+
+# Access databases (.accdb / .mdb) carry a Jet/ACE signature in their header.
+_ACCESS_SIGNATURES = (b"Standard Jet DB", b"Standard ACE DB")
+
+
+def looks_like_access(data: bytes) -> bool:
+    """Whether the bytes are a Microsoft Access database (the EBA DPM format)."""
+    return any(sig in data[:1024] for sig in _ACCESS_SIGNATURES)
+
+
+def verify_dpm_file(
+    data: bytes, filename: str, *, verifier=looks_like_access
+) -> None:
+    """Verify an uploaded DPM database, or raise a plain-language error.
+
+    Messages name what was expected in EBA-website terms so a reporter knows
+    exactly which download to grab. ``verifier`` is injectable for tests.
+    """
+    if not data:
+        raise ValidationError("The DPM database file is empty.")
+    if Path(filename).suffix.lower() not in (".accdb", ".mdb"):
+        raise ValidationError(
+            "This is not the EBA DPM database. On the EBA reporting-frameworks "
+            "page, download the DPM 2.0 database — a Microsoft Access file "
+            "(.accdb) — and upload that."
+        )
+    if not verifier(data):
+        raise ValidationError(
+            "This is not the EBA DPM database. The EBA DPM 2.0 download is a "
+            "Microsoft Access .accdb file; this file looks like something else "
+            "(a zip or spreadsheet). Upload the .accdb from the EBA "
+            "reporting-frameworks page."
+        )
+
+
+def create_release(
+    db: Session,
+    *,
+    regulator_id: int,
+    version_label: str,
+    dpm_bytes: bytes,
+    dpm_filename: str,
+    taxonomy_bytes: bytes,
+    taxonomy_filename: str,
+    rules_bytes: bytes,
+    rules_filename: str,
+    settings: Settings | None = None,
+    dpm_verifier=looks_like_access,
+) -> TaxonomySnapshot:
+    """Create a release from its three mandatory artifacts — all or nothing.
+
+    Every file is verified as being what it claims *before anything is
+    persisted*; a single failure means no release is created. Only once all
+    three verify are the files stored and the release row written (status
+    ``ingesting``); the caller schedules ``finalize_release_task`` to run the
+    slow DPM conversion + rule ingestion in the background. There is never a
+    partial release.
+    """
+    settings = settings or get_settings()
+    # Local imports keep the stage's public surface clean; both are same-stage.
+    from app.taxonomy import artifacts as _artifacts
+    from app.taxonomy import rules as _rules
+
+    label = (version_label or "").strip()
+    if not label:
+        raise ValidationError('A version label is required (for example "4.2").')
+
+    # Verify all three up front — persist nothing unless every one is valid.
+    verify_dpm_file(dpm_bytes, dpm_filename, verifier=dpm_verifier)
+    _artifacts.verify_taxonomy_package(taxonomy_bytes, taxonomy_filename)
+    _rules.verify_workbook_file(rules_bytes, rules_filename)
+
+    # All verified — persist the DPM (dedups by checksum) then the other two.
+    snapshot = register_snapshot(
+        db,
+        file_bytes=dpm_bytes,
+        filename=dpm_filename,
+        version_label=label,
+        regulator_id=regulator_id,
+        settings=settings,
+    )
+    try:
+        _artifacts.store_artifact(
+            db, snapshot, ReleaseSlot.taxonomy_package,
+            filename=taxonomy_filename, data=taxonomy_bytes, settings=settings,
+        )
+        _rules.store_workbook(
+            db, snapshot, filename=rules_filename, data=rules_bytes,
+            settings=settings,
+        )
+    except Exception:
+        # Roll the just-created release back so nothing partial survives.
+        db.delete(snapshot)
+        db.commit()
+        remove_snapshot_dir(settings, snapshot.id)
+        raise
+    logger.info("created release id=%s (verifying)", snapshot.id)
+    return snapshot
+
+
+def finalize_release(
+    db: Session,
+    snapshot: TaxonomySnapshot,
+    *,
+    settings: Settings | None = None,
+    converter=convert_accdb_to_sqlite,
+) -> None:
+    """Finish a created release: convert the DPM, ingest the rules → ready.
+
+    Any failure leaves the release ``failed`` (never a half-ready release). The
+    header of the rules workbook was already verified synchronously; this only
+    does the slow work (Access→SQLite conversion + parsing ~13k rule rows).
+    """
+    settings = settings or get_settings()
+    ingest_snapshot(db, snapshot, settings=settings, converter=converter)
+    if snapshot.status is not SnapshotStatus.ready:
+        return  # DPM conversion failed; the release is already marked failed
+
+    from app.taxonomy import rules as _rules
+
+    _rules.ingest_validation_rules(db, snapshot, settings=settings)
+    art = db.scalar(
+        select(ReleaseArtifact).where(
+            ReleaseArtifact.snapshot_id == snapshot.id,
+            ReleaseArtifact.slot == ReleaseSlot.validation_rules,
+        )
+    )
+    if art is not None and art.status is ArtifactStatus.failed:
+        snapshot.status = SnapshotStatus.failed
+        snapshot.error = f"validation rules could not be ingested: {art.error}"
+        db.commit()
+        logger.warning("release id=%s failed on rule ingestion", snapshot.id)
+
+
+def finalize_release_task(snapshot_id: int) -> None:
+    """Background entrypoint for ``finalize_release`` by id."""
+    settings = get_settings()
+    with SessionLocal() as db:
+        snapshot = db.get(TaxonomySnapshot, snapshot_id)
+        if snapshot is None:
+            logger.warning("finalize task: release id=%s not found", snapshot_id)
+            return
+        finalize_release(db, snapshot, settings=settings)
+
+
+def delete_release(
+    db: Session,
+    snapshot: TaxonomySnapshot,
+    *,
+    run_count: int,
+    settings: Settings | None = None,
+) -> None:
+    """Delete a release and its artifacts, unless runs were produced from it.
+
+    ``run_count`` is supplied by the caller (the workflows stage owns runs); a
+    release referenced by any run is kept for reproducibility and cannot be
+    deleted.
+    """
+    settings = settings or get_settings()
+    if run_count > 0:
+        raise ConflictError(
+            f"This release cannot be deleted — {run_count} "
+            f"run{'s' if run_count != 1 else ''} were produced from it. "
+            "Releases used by runs are kept so those runs stay reproducible."
+        )
+    db.execute(
+        delete(ValidationRule).where(ValidationRule.snapshot_id == snapshot.id)
+    )
+    db.execute(
+        delete(ReleaseArtifact).where(ReleaseArtifact.snapshot_id == snapshot.id)
+    )
+    db.delete(snapshot)
+    db.commit()
+    remove_snapshot_dir(settings, snapshot.id)
+    logger.info("deleted release id=%s", snapshot.id)
 
 
 def list_snapshots(db: Session) -> list[TaxonomySnapshot]:

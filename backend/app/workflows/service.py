@@ -484,6 +484,22 @@ def list_runs(db: Session, workflow_id: int) -> list[Run]:
     )
 
 
+def count_runs_for_snapshot(db: Session, snapshot_id: int) -> int:
+    """How many runs were produced from a release — the release-deletion guard.
+
+    Runs own this relationship (Run.snapshot_id), so this lives in the workflows
+    stage; the taxonomy stage receives the count via the composition root.
+    """
+    return (
+        db.scalar(
+            select(func.count()).select_from(Run).where(
+                Run.snapshot_id == snapshot_id
+            )
+        )
+        or 0
+    )
+
+
 def _require_attachable(run: Run) -> None:
     if run.status not in _ATTACHABLE:
         raise ValidationError(
