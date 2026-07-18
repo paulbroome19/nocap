@@ -1,25 +1,40 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
-import Workflows from './pages/Workflows.tsx'
+import Reporting from './pages/Reporting.tsx'
 import WorkflowDetail from './pages/WorkflowDetail.tsx'
-import Snapshots from './pages/Snapshots.tsx'
-import Runs from './pages/Runs.tsx'
 import RunDetail from './pages/RunDetail.tsx'
+import Releases from './pages/Releases.tsx'
+import ReleaseDetail from './pages/ReleaseDetail.tsx'
+import ReferenceData from './pages/ReferenceData.tsx'
+import EntityDetail from './pages/EntityDetail.tsx'
 
 const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
     children: [
-      { index: true, element: <Navigate to="/workflows" replace /> },
-      { path: 'workflows', element: <Workflows /> },
-      { path: 'workflows/:workflowId', element: <WorkflowDetail /> },
-      { path: 'snapshots', element: <Snapshots /> },
-      { path: 'runs', element: <Runs /> },
-      { path: 'runs/:runId', element: <RunDetail /> },
+      { index: true, element: <Navigate to="/reporting" replace /> },
+
+      // Reporting — workflows & runs.
+      { path: 'reporting', element: <Reporting /> },
+      { path: 'reporting/workflows/:workflowId', element: <WorkflowDetail /> },
+      { path: 'reporting/runs/:runId', element: <RunDetail /> },
+
+      // Releases — DPM & taxonomy artifacts.
+      { path: 'releases', element: <Releases /> },
+      { path: 'releases/:snapshotId', element: <ReleaseDetail /> },
+
+      // Reference Data — entities & per-workflow config.
+      { path: 'reference', element: <ReferenceData /> },
+      { path: 'reference/entities/:entityId', element: <EntityDetail /> },
+
+      // Legacy paths → new homes.
+      { path: 'workflows', element: <Navigate to="/reporting" replace /> },
+      { path: 'snapshots', element: <Navigate to="/releases" replace /> },
+      { path: 'runs', element: <Navigate to="/reporting" replace /> },
     ],
   },
 ])

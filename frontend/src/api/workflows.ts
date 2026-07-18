@@ -16,6 +16,35 @@ export interface Entity {
   default_scope: string
 }
 
+export interface EntityWrite {
+  name: string
+  lei: string
+  country: string
+  default_scope: string
+}
+
+export interface TemplateInfo {
+  code: string
+  name: string
+}
+
+/** "auto" is represented by the absence of a key. */
+export type Declaration = 'auto' | 'true' | 'false'
+
+export interface EntityWorkflowConfig {
+  entity_id: number
+  workflow_id: number
+  indicator_declarations: Record<string, 'true' | 'false'>
+  base_currency: string | null
+  decimals: number | null
+}
+
+export interface EntityWorkflowConfigWrite {
+  indicator_declarations: Record<string, Declaration>
+  base_currency: string | null
+  decimals: number | null
+}
+
 export type RunStatus =
   | 'created'
   | 'files_attached'
@@ -95,6 +124,16 @@ async function postJSON<T>(url: string, body?: unknown): Promise<T> {
   return res.json()
 }
 
+async function putJSON<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
 async function postFile<T>(url: string, file: File): Promise<T> {
   const form = new FormData()
   form.append('file', file)
@@ -107,6 +146,35 @@ export const listConfigs = () =>
   getJSON<WorkflowConfig[]>('/api/workflows/configs')
 
 export const listEntities = () => getJSON<Entity[]>('/api/workflows/entities')
+
+export const getEntity = (id: number) =>
+  getJSON<Entity>(`/api/workflows/entities/${id}`)
+
+export const createEntity = (body: EntityWrite) =>
+  postJSON<Entity>('/api/workflows/entities', body)
+
+export const updateEntity = (id: number, body: EntityWrite) =>
+  putJSON<Entity>(`/api/workflows/entities/${id}`, body)
+
+export const getEntityWorkflowConfig = (entityId: number, workflowId: number) =>
+  getJSON<EntityWorkflowConfig>(
+    `/api/workflows/entities/${entityId}/configs/${workflowId}`,
+  )
+
+export const updateEntityWorkflowConfig = (
+  entityId: number,
+  workflowId: number,
+  body: EntityWorkflowConfigWrite,
+) =>
+  putJSON<EntityWorkflowConfig>(
+    `/api/workflows/entities/${entityId}/configs/${workflowId}`,
+    body,
+  )
+
+export const listWorkflowTemplates = (workflowId: number, snapshotId: number) =>
+  getJSON<TemplateInfo[]>(
+    `/api/workflows/configs/${workflowId}/templates?snapshot_id=${snapshotId}`,
+  )
 
 export const runHistory = (workflowId: number) =>
   getJSON<Run[]>(`/api/workflows/configs/${workflowId}/runs`)

@@ -79,7 +79,7 @@ export default function WorkflowDetail() {
       }
       setBusy('Generating & validating…')
       await executeRun(run.id)
-      navigate(`/runs/${run.id}`)
+      navigate(`/reporting/runs/${run.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(null)
@@ -91,8 +91,11 @@ export default function WorkflowDetail() {
 
   return (
     <section>
-      <Link to="/workflows" className="text-xs text-slate-500 hover:text-slate-800">
-        ← Workflows
+      <Link
+        to="/reporting"
+        className="text-xs text-slate-500 transition-colors hover:text-slate-800"
+      >
+        ← Reporting
       </Link>
       <h1 className="mt-1 text-2xl font-semibold tracking-tight">
         {config?.name ?? 'Workflow'}
@@ -107,16 +110,16 @@ export default function WorkflowDetail() {
 
         {snapshots.length === 0 ? (
           <p className="mt-3 text-sm text-amber-700">
-            No ready snapshots.{' '}
-            <Link to="/snapshots" className="underline">
-              Upload a DPM release
+            No ready releases.{' '}
+            <Link to="/releases" className="underline">
+              Onboard a release
             </Link>{' '}
             first.
           </p>
         ) : (
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-600">Snapshot</span>
+              <span className="text-xs font-medium text-slate-600">Release</span>
               <select
                 className={field}
                 value={snapshotId}
@@ -253,7 +256,7 @@ export default function WorkflowDetail() {
                   <tr key={r.id} className="border-b border-slate-100 last:border-0">
                     <td className="px-4 py-3">
                       <Link
-                        to={`/runs/${r.id}`}
+                        to={`/reporting/runs/${r.id}`}
                         className="font-medium text-slate-900 hover:underline"
                       >
                         #{r.id}
