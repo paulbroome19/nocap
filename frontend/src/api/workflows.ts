@@ -308,6 +308,14 @@ export interface CreateRunBody {
 export const createRun = (body: CreateRunBody) =>
   sendJSON<Run>('POST', '/api/workflows/runs', body)
 
+/**
+ * Re-execute / resubmit an existing instance (FR 1.12). Creates a new run
+ * carrying the source run's instance identity (entity, date, keys); the caller
+ * then attaches a fact file and executes it.
+ */
+export const reexecuteRun = (runId: number) =>
+  sendJSON<Run>('POST', `/api/workflows/runs/${runId}/reexecute`)
+
 export const attachFactFile = (runId: number, file: File) =>
   postFile(`/api/workflows/runs/${runId}/fact-file`, file)
 

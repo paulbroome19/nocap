@@ -219,6 +219,17 @@ def create_run(body: RunCreate, db: Session = Depends(get_db)) -> RunOut:
     return RunOut.model_validate(run)
 
 
+@router.post("/runs/{run_id}/reexecute", response_model=RunOut, status_code=201)
+def reexecute_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
+    """Create a fresh execution of an existing instance (re-execute / resubmit).
+
+    Returns a new run in ``created`` status carrying the source run's instance
+    identity; the caller attaches a fact file and executes it.
+    """
+    run = service.reexecute_run(db, run_id)
+    return RunOut.model_validate(run)
+
+
 @router.get("/runs/{run_id}", response_model=RunDetailOut)
 def run_detail(run_id: int, db: Session = Depends(get_db)) -> RunDetailOut:
     run = service.get_run(db, run_id)

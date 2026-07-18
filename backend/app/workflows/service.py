@@ -418,6 +418,55 @@ def create_run(
     return run
 
 
+# The fields that identify a submission *instance* — a resubmission is a new
+# execution sharing all of these (EBA Filing Rule 1.12, full resubmission).
+INSTANCE_IDENTITY = (
+    "workflow_id", "entity_id", "reference_date",
+    "snapshot_key", "adjusted_key", "version_key",
+)
+
+
+def instance_identity(run: Run) -> tuple:
+    """The tuple that groups a run's executions into one submission instance."""
+    return tuple(getattr(run, f) for f in INSTANCE_IDENTITY)
+
+
+def reexecute_run(
+    db: Session, source_run_id: int, *, settings: Settings | None = None
+) -> Run:
+    """Create a fresh execution of an existing instance (re-execute / resubmit).
+
+    Append-only: a new ``Run`` is created carrying the source run's instance
+    identity (entity, reporting date, instance keys) and its release binding and
+    parameters; the source run and all prior executions are untouched. The caller
+    then attaches a new fact file and executes, exactly as for a first run.
+    """
+    src = get_run(db, source_run_id)
+    if src.entity_id is None:
+        raise ValidationError(
+            f"run id={source_run_id} has no entity; cannot re-execute"
+        )
+    new_run = create_run(
+        db,
+        workflow_id=src.workflow_id,
+        snapshot_id=src.snapshot_id,
+        reference_date=src.reference_date,
+        entity_id=src.entity_id,
+        snapshot_key=src.snapshot_key,
+        adjusted_key=src.adjusted_key,
+        version_key=src.version_key,
+        base_currency=src.base_currency,
+        decimals=src.decimals,
+        release_id=src.release_id,
+        settings=settings,
+    )
+    logger.info(
+        "re-executing instance from run id=%s → new run id=%s",
+        src.id, new_run.id, extra={"run_id": new_run.id},
+    )
+    return new_run
+
+
 def get_run(db: Session, run_id: int) -> Run:
     run = db.get(Run, run_id)
     if run is None:
