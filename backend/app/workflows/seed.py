@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
 from app.core.logging import configure_logging
-from app.workflows.models import WorkflowConfig
+from app.workflows.models import Entity, WorkflowConfig
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,29 @@ WORKFLOW_SEED: list[tuple[str, str, str]] = [
 ]
 
 
+# (name, LEI [20-char, valid format], country ISO, default scope) — fictional.
+ENTITY_SEED: list[tuple[str, str, str, str]] = [
+    ("Meridian Group Holdings plc", "213800MERIDNGRPHLD42", "GB", "CON"),
+    ("Nordbank AG", "529900NORDBANKAG7X31", "DE", "IND"),
+    ("Thistle Savings Bank plc", "213800THISTLESVBK019", "GB", "IND"),
+]
+
+
+def seed_entities(db: Session) -> int:
+    """Insert any missing demo entities (idempotent by LEI). Returns count."""
+    existing = set(db.scalars(select(Entity.lei)))
+    inserted = 0
+    for name, lei, country, default_scope in ENTITY_SEED:
+        if lei in existing:
+            continue
+        db.add(
+            Entity(name=name, lei=lei, country=country, default_scope=default_scope)
+        )
+        inserted += 1
+    db.commit()
+    return inserted
+
+
 def seed_workflow_configs(db: Session) -> int:
     """Insert any missing workflow configs. Returns the number inserted."""
     existing = set(db.scalars(select(WorkflowConfig.module_code)))
@@ -69,9 +92,10 @@ def seed_workflow_configs(db: Session) -> int:
 def main() -> None:
     configure_logging()
     with SessionLocal() as db:
-        inserted = seed_workflow_configs(db)
-    logger.info("seeded %d workflow config(s)", inserted)
-    print(f"seeded {inserted} workflow config(s)")
+        configs = seed_workflow_configs(db)
+        entities = seed_entities(db)
+    logger.info("seeded %d workflow config(s), %d entity(ies)", configs, entities)
+    print(f"seeded {configs} workflow config(s), {entities} entity(ies)")
 
 
 if __name__ == "__main__":

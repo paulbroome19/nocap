@@ -7,7 +7,9 @@ import {
   createRun,
   executeRun,
   listConfigs,
+  listEntities,
   runHistory,
+  type Entity,
   type Run,
   type WorkflowConfig,
 } from '../api/workflows'
@@ -20,14 +22,17 @@ export default function WorkflowDetail() {
 
   const [config, setConfig] = useState<WorkflowConfig | null>(null)
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [entities, setEntities] = useState<Entity[]>([])
   const [runs, setRuns] = useState<Run[]>([])
 
   // Form state
   const [snapshotId, setSnapshotId] = useState<number | ''>('')
   const [referenceDate, setReferenceDate] = useState('')
-  const [entityLei, setEntityLei] = useState('')
-  const [scope, setScope] = useState('CON')
+  const [entityId, setEntityId] = useState<number | ''>('')
+  const [scope, setScope] = useState('')
   const [factFile, setFactFile] = useState<File | null>(null)
+  // Advanced (optional) override
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [indicatorsFile, setIndicatorsFile] = useState<File | null>(null)
 
   const [busy, setBusy] = useState<string | null>(null)
@@ -40,19 +45,22 @@ export default function WorkflowDetail() {
   useEffect(() => {
     listConfigs().then((cs) => setConfig(cs.find((c) => c.id === id) ?? null))
     listSnapshots().then((s) => setSnapshots(s.filter((x) => x.status === 'ready')))
+    listEntities().then(setEntities)
     loadRuns()
   }, [id, loadRuns])
+
+  const selectedEntity = entities.find((e) => e.id === entityId)
+  const effectiveScope = scope || selectedEntity?.default_scope || ''
 
   const ready =
     snapshotId !== '' &&
     referenceDate !== '' &&
-    entityLei.trim() !== '' &&
+    entityId !== '' &&
     factFile !== null &&
-    indicatorsFile !== null &&
     busy === null
 
   async function handleRun() {
-    if (snapshotId === '' || !factFile || !indicatorsFile) return
+    if (snapshotId === '' || entityId === '' || !factFile) return
     setError(null)
     try {
       setBusy('Creating run…')
@@ -60,14 +68,16 @@ export default function WorkflowDetail() {
         workflow_id: id,
         snapshot_id: snapshotId,
         reference_date: referenceDate,
-        entity_lei: entityLei.trim(),
-        entity_scope: scope,
+        entity_id: entityId,
+        scope: scope || undefined,
       })
       setBusy('Uploading fact file…')
       await attachFactFile(run.id, factFile)
-      setBusy('Uploading indicators / parameters…')
-      await attachIndicatorsFile(run.id, indicatorsFile)
-      setBusy('Generating package…')
+      if (indicatorsFile) {
+        setBusy('Uploading indicators / parameters override…')
+        await attachIndicatorsFile(run.id, indicatorsFile)
+      }
+      setBusy('Generating & validating…')
       await executeRun(run.id)
       navigate(`/runs/${run.id}`)
     } catch (e) {
@@ -134,29 +144,40 @@ export default function WorkflowDetail() {
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-600">Entity LEI</span>
-              <input
-                type="text"
+              <span className="text-xs font-medium text-slate-600">Entity</span>
+              <select
                 className={field}
-                placeholder="20 alphanumeric chars"
-                value={entityLei}
-                onChange={(e) => setEntityLei(e.target.value)}
-              />
+                value={entityId}
+                onChange={(e) => {
+                  setEntityId(Number(e.target.value))
+                  setScope('')
+                }}
+              >
+                <option value="">Select…</option>
+                {entities.map((en) => (
+                  <option key={en.id} value={en.id}>
+                    {en.name} — {en.lei} ({en.country})
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-600">Scope</span>
+              <span className="text-xs font-medium text-slate-600">
+                Scope {selectedEntity && `(default ${selectedEntity.default_scope})`}
+              </span>
               <select
                 className={field}
-                value={scope}
+                value={effectiveScope}
                 onChange={(e) => setScope(e.target.value)}
+                disabled={!selectedEntity}
               >
                 <option value="CON">Consolidated (CON)</option>
                 <option value="IND">Individual (IND)</option>
               </select>
             </label>
 
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 sm:col-span-2">
               <span className="text-xs font-medium text-slate-600">Fact file (XLSX)</span>
               <input
                 type="file"
@@ -164,19 +185,33 @@ export default function WorkflowDetail() {
                 className="text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-slate-200"
                 onChange={(e) => setFactFile(e.target.files?.[0] ?? null)}
               />
+              <span className="text-xs text-slate-400">
+                Filing indicators and parameters are derived automatically.
+              </span>
             </label>
 
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-600">
-                Indicators / parameters (XLSX)
-              </span>
-              <input
-                type="file"
-                accept=".xlsx"
-                className="text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-slate-200"
-                onChange={(e) => setIndicatorsFile(e.target.files?.[0] ?? null)}
-              />
-            </label>
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="text-xs text-slate-500 hover:text-slate-800"
+              >
+                {showAdvanced ? '▾' : '▸'} Advanced — override indicators / parameters
+              </button>
+              {showAdvanced && (
+                <label className="mt-2 flex flex-col gap-1">
+                  <span className="text-xs font-medium text-slate-600">
+                    Indicators / parameters (XLSX) — optional
+                  </span>
+                  <input
+                    type="file"
+                    accept=".xlsx"
+                    className="text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-slate-200"
+                    onChange={(e) => setIndicatorsFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              )}
+            </div>
           </div>
         )}
 

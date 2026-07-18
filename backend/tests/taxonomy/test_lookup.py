@@ -63,7 +63,13 @@ def test_release_binding_defaults_to_current_and_dedupes(mini_dpm: Path) -> None
 def test_list_templates_for_module(mini_dpm: Path) -> None:
     with TaxonomyLookup(mini_dpm) as lk:
         codes = [t.code for t in lk.list_templates("COREP_LCR_DA")]
-    assert codes == ["C_67.00.a", "C_72.00.a"]
+    assert codes == ["C_67.00.a", "C_72.00.a", "C_77.00"]
+
+
+def test_open_templates(mini_dpm: Path) -> None:
+    with TaxonomyLookup(mini_dpm) as lk:
+        # C_77.00 has KeyID set (open); the others are closed.
+        assert lk.open_templates("COREP_LCR_DA") == {"C_77.00"}
 
 
 def test_list_templates_unknown_module_is_empty(mini_dpm: Path) -> None:

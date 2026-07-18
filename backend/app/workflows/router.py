@@ -20,6 +20,7 @@ from app.facts.schemas import (
 from app.validation.schemas import FindingOut
 from app.workflows import service
 from app.workflows.schemas import (
+    EntityOut,
     RunCreate,
     RunDetailOut,
     RunOut,
@@ -34,6 +35,11 @@ def list_workflows(db: Session = Depends(get_db)) -> list[WorkflowConfigOut]:
     return [
         WorkflowConfigOut.model_validate(w) for w in service.list_workflows(db)
     ]
+
+
+@router.get("/entities", response_model=list[EntityOut])
+def list_entities(db: Session = Depends(get_db)) -> list[EntityOut]:
+    return [EntityOut.model_validate(e) for e in service.list_entities(db)]
 
 
 @router.get("/configs/{workflow_id}/runs", response_model=list[RunOut])
@@ -51,10 +57,11 @@ def create_run(body: RunCreate, db: Session = Depends(get_db)) -> RunOut:
         workflow_id=body.workflow_id,
         snapshot_id=body.snapshot_id,
         reference_date=body.reference_date,
-        entity_lei=body.entity_lei,
-        entity_scope=body.entity_scope,
+        entity_id=body.entity_id,
+        scope=body.scope,
+        base_currency=body.base_currency,
+        decimals=body.decimals,
         release_id=body.release_id,
-        country=body.country,
     )
     return RunOut.model_validate(run)
 

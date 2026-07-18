@@ -463,6 +463,18 @@ WHERE mv.Code = :module AND {_RELEASE_VALID.format(a="mv")}
 LIMIT 1
 """
 
+# Templates in a module that the DPM marks as open/keyed (TableVersion.KeyID set).
+# v1 generates closed tables only; open tables are guarded out.
+_OPEN_TEMPLATES_SQL = f"""
+SELECT DISTINCT tv.Code
+FROM ModuleVersion mv
+JOIN ModuleVersionComposition mvc ON mvc.ModuleVID = mv.ModuleVID
+JOIN TableVersion tv ON tv.TableVID = mvc.TableVID
+WHERE mv.Code = :module AND tv.KeyID IS NOT NULL
+  AND {_RELEASE_VALID.format(a="mv")}
+  AND {_RELEASE_VALID.format(a="tv")}
+"""
+
 
 class TaxonomyLookup:
     """Read-only queries against one snapshot's converted DPM SQLite file.
@@ -544,6 +556,16 @@ class TaxonomyLookup:
             _LIST_TEMPLATES_SQL, {"module": module_code, "rid": rid}
         ).fetchall()
         return [TemplateInfo(code=r[0], name=r[1]) for r in rows]
+
+    def open_templates(
+        self, module_code: str, *, release_id: int | None = None
+    ) -> set[str]:
+        """Template codes in the module the DPM marks as open/keyed."""
+        rid = release_id if release_id is not None else self.default_release_id()
+        rows = self._conn.execute(
+            _OPEN_TEMPLATES_SQL, {"module": module_code, "rid": rid}
+        ).fetchall()
+        return {r[0] for r in rows}
 
     def module_metadata(
         self, module_code: str, *, release_id: int | None = None

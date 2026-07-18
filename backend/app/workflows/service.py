@@ -25,6 +25,7 @@ from app.facts.models import RunFile, RunFileRole
 from app.facts.parsers import default_indicators_params_parser
 from app.facts.schemas import (
     FactIngestSummary,
+    FilingIndicator,
     IndicatorsParams,
     IndicatorsParamsIngestSummary,
 )
@@ -41,7 +42,7 @@ from app.taxonomy.service import normalize_template_code
 from app.validation import service as validation
 from app.validation.models import Severity, ValidationFinding, ValidationPhase
 from app.validation.schemas import Finding
-from app.workflows.models import Run, RunStatus, WorkflowConfig
+from app.workflows.models import Entity, Run, RunStatus, WorkflowConfig
 
 logger = logging.getLogger(__name__)
 
@@ -83,16 +84,28 @@ def get_workflow(db: Session, workflow_id: int) -> WorkflowConfig:
 # --- run lifecycle ---------------------------------------------------------
 
 
+def list_entities(db: Session) -> list[Entity]:
+    return list(db.scalars(select(Entity).order_by(Entity.name)))
+
+
+def get_entity(db: Session, entity_id: int) -> Entity:
+    entity = db.get(Entity, entity_id)
+    if entity is None:
+        raise NotFoundError(f"entity id={entity_id} not found")
+    return entity
+
+
 def create_run(
     db: Session,
     *,
     workflow_id: int,
     snapshot_id: int,
     reference_date: date,
-    entity_lei: str,
-    entity_scope: str = "CON",
+    entity_id: int,
+    scope: str | None = None,
+    base_currency: str | None = None,
+    decimals: int | None = None,
     release_id: int | None = None,
-    country: str | None = None,
     settings: Settings | None = None,
 ) -> Run:
     settings = settings or get_settings()
@@ -114,10 +127,13 @@ def create_run(
             f"(status={snapshot.status.value})"
         )
 
-    scope = entity_scope.strip().upper()
-    if scope not in {"IND", "CON"}:
-        raise ValidationError("entity_scope must be IND or CON")
-    lei = _validate_lei(entity_lei)
+    entity = get_entity(db, entity_id)
+    run_scope = (scope or entity.default_scope).strip().upper()
+    if run_scope not in {"IND", "CON"}:
+        raise ValidationError("scope must be IND or CON")
+    currency = (base_currency or "EUR").strip().upper()
+    if len(currency) != 3 or not currency.isalpha():
+        raise ValidationError("base_currency must be a 3-letter ISO code")
 
     with taxonomy.open_lookup(snapshot, settings=settings) as lk:
         rid = release_id if release_id is not None else lk.default_release_id()
@@ -132,17 +148,20 @@ def create_run(
         snapshot_id=snapshot.id,
         release_id=rid,
         reference_date=reference_date,
-        entity_lei=lei,
-        entity_scope=scope,
-        country=(country or settings.default_country).upper(),
+        entity_id=entity.id,
+        entity_lei=_validate_lei(entity.lei),
+        entity_scope=run_scope,
+        country=entity.country.upper(),
+        base_currency=currency,
+        decimals=decimals if decimals is not None else -3,
         status=RunStatus.created,
     )
     db.add(run)
     db.commit()
     db.refresh(run)
     logger.info(
-        "created run id=%s workflow=%s", run.id, wf.module_code,
-        extra={"run_id": run.id},
+        "created run id=%s workflow=%s entity=%s", run.id, wf.module_code,
+        entity.lei, extra={"run_id": run.id},
     )
     return run
 
@@ -238,6 +257,29 @@ def _load_params(settings: Settings, run_file: RunFile) -> IndicatorsParams:
     return result.params
 
 
+def _derive_indicators_params(
+    run: Run, module_templates: set[str], closed_with_facts: set[str]
+) -> IndicatorsParams:
+    """Derive indicators & parameters in-system from the run + its facts.
+
+    Filing indicators: every module template, reported iff it has (closed,
+    resolvable) facts. Parameters: entity + reference date + base currency +
+    decimals from the run.
+    """
+    return IndicatorsParams(
+        filing_indicators=[
+            FilingIndicator(
+                template_code=template, reported=template in closed_with_facts
+            )
+            for template in sorted(module_templates)
+        ],
+        entity_lei=run.entity_lei,
+        reference_date=run.reference_date,
+        base_currency=run.base_currency,
+        decimals=run.decimals,
+    )
+
+
 def _safe_validate(what: str, fn) -> list[Finding]:
     """Run a validator; a crash becomes a finding, never a failed run."""
     try:
@@ -297,13 +339,11 @@ def execute_run(
 
     files = facts.list_run_files(db, run.id)
     fact_files = [f for f in files if f.role is RunFileRole.fact_input]
+    # Indicators/parameters are derived in-system by default; an uploaded file is
+    # an optional "advanced" override.
     ind_files = [f for f in files if f.role is RunFileRole.indicators_params]
     if not fact_files:
         raise ValidationError("no fact file attached to this run")
-    if not ind_files:
-        raise ValidationError(
-            "no indicators/parameters file attached to this run"
-        )
 
     run.status = RunStatus.running
     run.error = None
@@ -314,17 +354,7 @@ def execute_run(
     try:
         wf = get_workflow(db, run.workflow_id)
         snapshot = taxonomy.get_snapshot(db, run.snapshot_id)
-        params = _load_params(settings, ind_files[-1])
         fact_rows = facts.list_facts(db, run.id, limit=1_000_000)
-        fact_inputs = [
-            FactInput(
-                template_code=f.template_code,
-                row_code=f.row_code,
-                column_code=f.column_code,
-                value=f.value,
-            )
-            for f in fact_rows
-        ]
         findings: list[Finding] = []
 
         with taxonomy.open_lookup(snapshot, settings=settings) as lk:
@@ -335,11 +365,36 @@ def execute_run(
                 )
             module_templates = {
                 t.code
-                for t in lk.list_templates(wf.module_code, release_id=run.release_id)
+                for t in lk.list_templates(
+                    wf.module_code, release_id=run.release_id
+                )
             }
+            open_templates = lk.open_templates(
+                wf.module_code, release_id=run.release_id
+            )
 
             def resolve(t, r, c):
                 return lk.resolve(t, r, c, release_id=run.release_id)
+
+            # Which closed templates actually have resolvable facts, and their
+            # datatypes (drives derived filing indicators + parameters).
+            closed_with_facts: set[str] = set()
+            datatypes_present: set[str] = set()
+            for f in fact_rows:
+                if f.template_code in open_templates:
+                    continue
+                res = resolve(f.template_code, f.row_code, f.column_code)
+                if res is not None:
+                    closed_with_facts.add(f.template_code)
+                    datatypes_present.add(res.datatype_code)
+
+            # Indicators & parameters: uploaded override, else derived in-system.
+            if ind_files:
+                params = _load_params(settings, ind_files[-1])
+            else:
+                params = _derive_indicators_params(
+                    run, module_templates, closed_with_facts
+                )
 
             # Phase 1 — pre-generation checks on the facts.
             findings += _safe_validate(
@@ -348,17 +403,13 @@ def execute_run(
                     facts=fact_rows,
                     resolve=resolve,
                     module_templates=module_templates,
+                    open_templates=open_templates,
                     filing_indicators=params.filing_indicators,
                     fact_file_name=fact_files[-1].filename,
                     entity_id=run.entity_lei,
                     ref_period=run.reference_date,
                 ),
             )
-            datatypes_present = {
-                res.datatype_code
-                for f in fact_rows
-                if (res := resolve(f.template_code, f.row_code, f.column_code))
-            }
 
             metadata = PackageMetadata(
                 entity_lei=run.entity_lei,
@@ -379,10 +430,20 @@ def execute_run(
                     for fi in params.filing_indicators
                 ],
             )
-            # Lenient build so a package is always produced for inspection; the
-            # unresolved/duplicate facts are reported as findings above.
+            # Exclude open-table facts (guarded as findings) so we never emit a
+            # malformed CSV; lenient build skips unresolved facts too.
+            generatable = [
+                FactInput(
+                    template_code=f.template_code,
+                    row_code=f.row_code,
+                    column_code=f.column_code,
+                    value=f.value,
+                )
+                for f in fact_rows
+                if f.template_code not in open_templates
+            ]
             package = generation.build_package(
-                fact_inputs, metadata, resolve=resolve, strict=False
+                generatable, metadata, resolve=resolve, strict=False
             )
 
         # Phase 2 — post-generation checks on the built package.

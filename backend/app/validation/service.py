@@ -127,6 +127,7 @@ def validate_facts(
     facts: Sequence[FactLike],
     resolve: Resolver,
     module_templates: set[str],
+    open_templates: set[str],
     filing_indicators: Iterable[IndicatorLike],
     fact_file_name: str,
     entity_id: str | None,
@@ -146,7 +147,24 @@ def validate_facts(
 
     by_datapoint: dict[int, list[FactLike]] = defaultdict(list)
     templates_with_facts: set[str] = set()
+    open_flagged: set[str] = set()
     for fact in facts:
+        # Open/keyed tables are not supported in v1 — flag once per template and
+        # skip (they are also excluded from generation, so no malformed CSV).
+        if fact.template_code in open_templates:
+            if fact.template_code not in open_flagged:
+                open_flagged.add(fact.template_code)
+                findings.append(
+                    Finding(
+                        severity=Severity.error,
+                        phase=_PRE,
+                        code="OPEN_TABLE_UNSUPPORTED",
+                        message=f"open-table template {fact.template_code} not "
+                        "supported in v1; scheduled",
+                        template_code=fact.template_code,
+                    )
+                )
+            continue
         res = resolve(fact.template_code, fact.row_code, fact.column_code)
         if res is None:
             findings.append(

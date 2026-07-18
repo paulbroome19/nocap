@@ -8,6 +8,14 @@ export interface WorkflowConfig {
   active: boolean
 }
 
+export interface Entity {
+  id: number
+  name: string
+  lei: string
+  country: string
+  default_scope: string
+}
+
 export type RunStatus =
   | 'created'
   | 'files_attached'
@@ -98,6 +106,8 @@ async function postFile<T>(url: string, file: File): Promise<T> {
 export const listConfigs = () =>
   getJSON<WorkflowConfig[]>('/api/workflows/configs')
 
+export const listEntities = () => getJSON<Entity[]>('/api/workflows/entities')
+
 export const runHistory = (workflowId: number) =>
   getJSON<Run[]>(`/api/workflows/configs/${workflowId}/runs`)
 
@@ -105,8 +115,8 @@ export interface CreateRunBody {
   workflow_id: number
   snapshot_id: number
   reference_date: string
-  entity_lei: string
-  entity_scope: string
+  entity_id: number
+  scope?: string
 }
 
 export const createRun = (body: CreateRunBody) =>
