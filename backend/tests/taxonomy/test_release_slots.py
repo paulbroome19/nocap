@@ -162,9 +162,9 @@ def test_artifacts_endpoint_returns_slots(client, db_session, mini_dpm: Path) ->
     assert resp.status_code == 200
     body = resp.json()
     assert body["ready"] is True
+    # Only the three functional slots surface; reference slots are not shown.
     assert {s["slot"] for s in body["slots"]} == {
         "dpm_database", "taxonomy_package", "validation_rules",
-        "filing_rules", "sample_files",
     }
 
 

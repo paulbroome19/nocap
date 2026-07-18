@@ -18,6 +18,7 @@ from app.taxonomy import artifacts, capabilities, coherence, rules, service
 from app.taxonomy.models import ReleaseSlot, TaxonomySnapshot
 from app.taxonomy.schemas import (
     CapabilitySetOut,
+    RegulatorOut,
     ReleaseDetailOut,
     ReleaseSlotOut,
     SnapshotOut,
@@ -46,6 +47,8 @@ def _snapshot_out(db: Session, snapshot: TaxonomySnapshot) -> SnapshotOut:
 
 def _release_detail(db: Session, snapshot: TaxonomySnapshot) -> ReleaseDetailOut:
     slot_views = artifacts.list_slots(db, snapshot)
+    # The three functional artifacts only. Reference slots (filing rules,
+    # samples) are kept in the repo docs but are not part of the release surface.
     slots = [
         ReleaseSlotOut(
             slot=v.spec.slot,
@@ -60,6 +63,7 @@ def _release_detail(db: Session, snapshot: TaxonomySnapshot) -> ReleaseDetailOut
             uploaded_at=v.uploaded_at,
         )
         for v in slot_views
+        if v.spec.requirement != "reference"
     ]
     caps = capabilities.derive_capabilities(slot_views)
     return ReleaseDetailOut(
@@ -69,6 +73,34 @@ def _release_detail(db: Session, snapshot: TaxonomySnapshot) -> ReleaseDetailOut
         capabilities=CapabilitySetOut(**caps.to_dict()),
         coherence_warnings=coherence.coherence_warnings(db, snapshot),
     )
+
+
+@router.get("/regulators", response_model=list[RegulatorOut])
+def list_regulators(db: Session = Depends(get_db)) -> list[RegulatorOut]:
+    """The taxonomy publishers (e.g. EBA) — the top of the Taxonomies section."""
+    return [RegulatorOut.model_validate(r) for r in service.list_regulators(db)]
+
+
+@router.get("/regulators/{regulator_id}", response_model=RegulatorOut)
+def get_regulator(
+    regulator_id: int, db: Session = Depends(get_db)
+) -> RegulatorOut:
+    return RegulatorOut.model_validate(service.get_regulator(db, regulator_id))
+
+
+@router.get(
+    "/regulators/{regulator_id}/releases", response_model=list[SnapshotOut]
+)
+def list_regulator_releases(
+    regulator_id: int, db: Session = Depends(get_db)
+) -> list[SnapshotOut]:
+    """The releases published by one regulator."""
+    service.get_regulator(db, regulator_id)  # 404 if unknown
+    service.verify_all_snapshots(db)
+    return [
+        _snapshot_out(db, s)
+        for s in service.list_snapshots_for_regulator(db, regulator_id)
+    ]
 
 
 @router.get("/snapshots", response_model=list[SnapshotOut])

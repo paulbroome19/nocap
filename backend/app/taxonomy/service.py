@@ -32,6 +32,7 @@ from app.core.db import SessionLocal
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.taxonomy.models import (
     ArtifactStatus,
+    Regulator,
     ReleaseArtifact,
     ReleaseSlot,
     SnapshotStatus,
@@ -551,6 +552,30 @@ def delete_release(
 def list_snapshots(db: Session) -> list[TaxonomySnapshot]:
     return list(
         db.scalars(select(TaxonomySnapshot).order_by(TaxonomySnapshot.id.desc()))
+    )
+
+
+def list_regulators(db: Session) -> list[Regulator]:
+    return list(db.scalars(select(Regulator).order_by(Regulator.code)))
+
+
+def get_regulator(db: Session, regulator_id: int) -> Regulator:
+    regulator = db.get(Regulator, regulator_id)
+    if regulator is None:
+        raise NotFoundError(f"regulator id={regulator_id} not found")
+    return regulator
+
+
+def list_snapshots_for_regulator(
+    db: Session, regulator_id: int
+) -> list[TaxonomySnapshot]:
+    """Releases published by one regulator, newest first."""
+    return list(
+        db.scalars(
+            select(TaxonomySnapshot)
+            .where(TaxonomySnapshot.regulator_id == regulator_id)
+            .order_by(TaxonomySnapshot.id.desc())
+        )
     )
 
 
