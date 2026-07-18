@@ -44,10 +44,10 @@ from app.generation.schemas import (
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
 from app.taxonomy.service import normalize_template_code
-from app.validation import checks as validation_checks
+from app.validation import register as validation_register
 from app.validation import report as validation_report
 from app.validation import service as validation
-from app.validation.arelle_adapter import ArelleFormulaValidator
+from app.validation.arelle_adapter import ArelleFormulaValidator, FormulaRun
 from app.validation.models import Severity, ValidationFinding, ValidationPhase
 from app.validation.schemas import Finding
 from app.workflows.models import (
@@ -655,9 +655,8 @@ def _write_validation_report(
     findings = list_findings(db, run.id)  # ORM rows duck-type the Finding shape
     report = validation_report.build_report_html(
         identity=_report_identity(db, run, wf, package_filename),
-        structural_checks=validation_checks.structural_check_results(findings),
+        register=validation_register.build_register(findings, run.formula_summary),
         formula=run.formula_summary,
-        findings=findings,
     )
     facts.upsert_run_file(
         db,
@@ -889,33 +888,46 @@ def execute_run(
     return run
 
 
-def _build_formula_summary(findings: list[Finding]) -> dict:
-    """Summarise a formula-validation run for the report + UI (truthful only).
+def _build_formula_summary(run: FormulaRun) -> dict:
+    """Summarise a formula-validation run for the register + report.
 
-    We report whether it executed, the unsatisfied rule ids, and the EBA
-    deactivated-rules note. Total rules evaluated / satisfied are not captured
-    (Arelle isn't configured to emit result counts), so they are omitted rather
-    than fabricated.
+    Carries the per-rule results the adapter captured (satisfied + not-satisfied,
+    for the evaluated rules), the loaded/evaluated counts, and the EBA
+    deactivated-rules note.
     """
-    deactivated = validation_checks.deactivated_rules()
-    unavailable = [f for f in findings if f.code == "FORMULA_VALIDATION_UNAVAILABLE"]
-    if unavailable:
+    if not run.available:
         return {
             "status": "unavailable",
+            "loaded": 0,
+            "evaluated": 0,
             "unsatisfied": 0,
-            "unsatisfied_rule_ids": [],
-            "deactivated": deactivated,
-            "note": unavailable[0].message,
+            "satisfied": 0,
+            "rules": [],
+            "deactivated": run.deactivated,
+            "note": run.unavailable_reason,
         }
-    rule_ids: list[str] = []
-    for f in findings:
-        if f.code != "FORMULA_VALIDATION_UNAVAILABLE" and f.code not in rule_ids:
-            rule_ids.append(f.code)
+    rules = [
+        {
+            "rule_id": r.rule_id,
+            "assertion_type": r.assertion_type,
+            "satisfied": r.satisfied,
+            "not_satisfied": r.not_satisfied,
+            "result": r.result,
+            "values": r.values,
+            "message": r.message,
+        }
+        for r in run.rule_results
+    ]
+    unsatisfied = sum(1 for r in run.rule_results if r.result == "FAILED")
+    satisfied = sum(1 for r in run.rule_results if r.result == "PASSED")
     return {
         "status": "executed",
-        "unsatisfied": len(rule_ids),
-        "unsatisfied_rule_ids": rule_ids,
-        "deactivated": deactivated,
+        "loaded": run.loaded,
+        "evaluated": len(run.rule_results),
+        "unsatisfied": unsatisfied,
+        "satisfied": satisfied,
+        "rules": rules,
+        "deactivated": run.deactivated,
         "note": None,
     }
 
@@ -948,9 +960,10 @@ def run_formula_validation_task(run_id: int) -> None:
             extra={"run_id": run.id},
         )
         validator = ArelleFormulaValidator(cache_dir=settings.data_dir / "cache")
-        findings = validator.validate(package_path, taxo)  # never raises
+        result = validator.validate_detailed(package_path, taxo)  # never raises
+        findings = result.findings
 
-        run.formula_summary = _build_formula_summary(findings)
+        run.formula_summary = _build_formula_summary(result)
         _append_findings(db, run.id, findings)
         _write_validation_report(
             db, run, wf, outputs[-1].filename, settings=settings
