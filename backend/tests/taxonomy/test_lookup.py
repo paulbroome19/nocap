@@ -11,7 +11,7 @@ def test_resolve_returns_datapoint_and_datatype(mini_dpm: Path) -> None:
     with TaxonomyLookup(mini_dpm) as lk:
         res = lk.resolve("C_67.00.a", "0020", "0060")
     assert res is not None
-    assert res.datapoint_id == 900
+    assert res.datapoint_id == 9900  # VariableID (the xBRL property-group key)
     assert res.datatype_code == "m"
     assert res.datatype_name == "monetary"
     assert res.period_type == "Stock"
@@ -24,14 +24,14 @@ def test_resolve_accepts_all_template_forms(mini_dpm: Path) -> None:
             lk.resolve(code, "0020", "0060").datapoint_id
             for code in ("C_67.00.a", "C_67_00_a", "C 67.00.a")
         }
-    assert ids == {900}
+    assert ids == {9900}
 
 
 def test_resolve_second_datapoint_percentage(mini_dpm: Path) -> None:
     with TaxonomyLookup(mini_dpm) as lk:
         res = lk.resolve("C_67.00.a", "0010", "0010")
     assert res is not None
-    assert res.datapoint_id == 901
+    assert res.datapoint_id == 9901  # VariableID
     assert res.datatype_code == "p"
 
 
@@ -54,10 +54,10 @@ def test_release_binding_defaults_to_current_and_dedupes(mini_dpm: Path) -> None
     with TaxonomyLookup(mini_dpm) as lk:
         assert lk.default_release_id() == 2
         res = lk.resolve("C_67.00.a", "0020", "0060")  # defaults to release 2
-        assert res is not None and res.datapoint_id == 900
+        assert res is not None and res.datapoint_id == 9900
         # Explicit older release also resolves (older header window).
         res1 = lk.resolve("C_67.00.a", "0020", "0060", release_id=1)
-        assert res1 is not None and res1.datapoint_id == 900
+        assert res1 is not None and res1.datapoint_id == 9900
 
 
 def test_list_templates_for_module(mini_dpm: Path) -> None:
