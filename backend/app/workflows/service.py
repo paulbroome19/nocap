@@ -51,6 +51,7 @@ from app.taxonomy import rules as taxonomy_rules
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import (
     ReleaseArtifact,
+    ReleaseModule,
     SnapshotStatus,
     TaxonomySnapshot,
 )

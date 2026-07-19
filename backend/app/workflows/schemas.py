@@ -242,3 +242,52 @@ class RunDetailOut(BaseModel):
     rule_register: list[RegisterRowOut]
     formula_summary: dict | None
     verdict: VerdictOut
+
+
+class ModuleVersionOption(BaseModel):
+    """One selectable taxonomy version for a module — a distinct
+    ``(module_version, framework_version)`` across every ready release.
+
+    The dropdown shows ``module_version`` alone; the rest is supporting detail
+    (which releases provide it, its reference-date window, the framework
+    version). ``snapshot_id`` is the release a run binds to when this option is
+    chosen (the newest release providing the version) — detail, not a choice."""
+
+    module_code: str
+    module_name: str | None
+    module_version: str
+    framework_version: str
+    snapshot_id: int
+    valid_from: date | None
+    valid_to: date | None
+    provided_by: list[str]  # release display names, newest first
+
+
+class ModuleVersionOptions(BaseModel):
+    """The taxonomy versions available for a reporting suite. Empty when no
+    ready release contains the module — the suite cannot be run yet."""
+
+    workflow_id: int
+    module_code: str
+    options: list[ModuleVersionOption]
+
+
+class ReleaseProvision(BaseModel):
+    """What a release provides for one enabled reporting suite, and whether that
+    is new to the estate. ``already_from`` names the earliest release that first
+    provided this same version (present only when not new)."""
+
+    module_code: str
+    module_name: str | None
+    workflow_name: str
+    module_version: str | None  # None when the release doesn't contain the module
+    framework_version: str | None
+    is_new: bool
+    already_from: str | None
+
+
+class ReleaseProvisionsSummary(BaseModel):
+    """The ingestion summary: per enabled suite, what this release provides."""
+
+    snapshot_id: int
+    provisions: list[ReleaseProvision]

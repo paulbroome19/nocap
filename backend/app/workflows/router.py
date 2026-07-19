@@ -15,7 +15,7 @@ from app.core.db import get_db
 from app.facts.schemas import FactIngestSummary, RunFileOut
 from app.taxonomy.schemas import TemplateInfo
 from app.validation.schemas import FindingOut
-from app.workflows import service
+from app.workflows import service, version_selection
 from app.workflows.models import RunStatus
 from app.workflows.schemas import (
     CategoryOut,
@@ -24,10 +24,12 @@ from app.workflows.schemas import (
     EntityWorkflowConfigWrite,
     EntityWrite,
     FactRowOut,
+    ModuleVersionOptions,
     OutputFormatWrite,
     ReexecuteRequest,
     RegisterRowOut,
     RegulatorFormatOut,
+    ReleaseProvisionsSummary,
     RunCreate,
     RunDetailOut,
     RunOut,
@@ -116,6 +118,30 @@ def workflow_templates(
 ) -> list[TemplateInfo]:
     """Templates composing the workflow's module in a release (for config UI)."""
     return service.list_module_templates(db, workflow_id, snapshot_id)
+
+
+@router.get(
+    "/configs/{workflow_id}/module-versions",
+    response_model=ModuleVersionOptions,
+)
+def module_versions(
+    workflow_id: int, db: Session = Depends(get_db)
+) -> ModuleVersionOptions:
+    """The distinct taxonomy versions this suite's module is available at, across
+    all ready releases — the submission workspace's version selector."""
+    return version_selection.list_module_versions(db, workflow_id)
+
+
+@router.get(
+    "/releases/{snapshot_id}/provisions",
+    response_model=ReleaseProvisionsSummary,
+)
+def release_provisions(
+    snapshot_id: int, db: Session = Depends(get_db)
+) -> ReleaseProvisionsSummary:
+    """What a release provides for each enabled suite, and whether it is new —
+    the ingestion summary shown after a release finishes ingesting."""
+    return version_selection.release_provisions_summary(db, snapshot_id)
 
 
 @router.get("/entities", response_model=list[EntityOut])
