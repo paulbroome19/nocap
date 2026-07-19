@@ -214,6 +214,10 @@ export default function ReleaseDetail() {
               <dd className="font-mono text-slate-600">{release.original_filename}</dd>
             </div>
             <div className="flex gap-3">
+              <dt className="w-32 shrink-0 text-slate-400">DPM source</dt>
+              <dd className="text-slate-600">{release.dpm_source_label}</dd>
+            </div>
+            <div className="flex gap-3">
               <dt className="w-32 shrink-0 text-slate-400">DPM checksum</dt>
               <dd className="break-all font-mono text-slate-400">{release.checksum}</dd>
             </div>

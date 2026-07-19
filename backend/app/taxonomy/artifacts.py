@@ -68,10 +68,12 @@ SLOT_SPECS: tuple[SlotSpec, ...] = (
         slot=ReleaseSlot.dpm_database,
         label="DPM database",
         requirement="required",
-        accept=(".accdb", ".mdb"),
+        accept=(".accdb", ".mdb", ".sqlite", ".sqlite3", ".db"),
         description=(
-            "EBA DPM 2.0 Access database. Converted to the query database on "
-            "upload; the release is unusable until this is ready."
+            "EBA DPM 2.0 Access database (.accdb), converted to the query "
+            "database on upload. If that file is too large to upload, supply a "
+            "pre-converted DPM database (.sqlite) made with the documented "
+            "command instead. The release is unusable until this is ready."
         ),
     ),
     SlotSpec(

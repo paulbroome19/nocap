@@ -68,6 +68,21 @@ class SnapshotStatus(enum.StrEnum):
     artifacts_missing = "artifacts_missing"
 
 
+class DpmSourceForm(enum.StrEnum):
+    """Which input form the DPM database was supplied in — provenance.
+
+    ``accdb`` — the original EBA DPM 2.0 Microsoft Access file, converted to the
+    query SQLite on the server via mdbtools (the canonical, self-contained path).
+    ``sqlite`` — a pre-converted SQLite supplied directly, for when uploading the
+    ~720 MB Access file over the web is impractical (the operator converts it
+    locally with the documented command). Both yield an identical query database;
+    this records which route a release came in by, for the audit trail.
+    """
+
+    accdb = "accdb"
+    sqlite = "sqlite"
+
+
 class TaxonomySnapshot(Base):
     __tablename__ = "taxonomy_snapshot"
 
@@ -88,6 +103,14 @@ class TaxonomySnapshot(Base):
     # sha256 of the uploaded bytes. Unique: the same release is never ingested
     # twice (duplicates are rejected at upload).
     checksum: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+
+    # Which form the DPM was supplied in (original .accdb vs pre-converted
+    # SQLite) — provenance for the audit trail. Legacy rows default to accdb.
+    dpm_source_form: Mapped[DpmSourceForm] = mapped_column(
+        Enum(DpmSourceForm, name="dpm_source_form"),
+        default=DpmSourceForm.accdb,
+        server_default=DpmSourceForm.accdb.value,
+    )
 
     status: Mapped[SnapshotStatus] = mapped_column(
         Enum(SnapshotStatus, name="snapshot_status"),
@@ -113,6 +136,14 @@ class TaxonomySnapshot(Base):
     def display_name(self) -> str:
         """Business name for this release, e.g. "EBA Taxonomy 4.2"."""
         return f"{self.regulator.code} Taxonomy {self.version_label}"
+
+    @property
+    def dpm_source_label(self) -> str:
+        """Business-readable provenance of the DPM input form."""
+        return {
+            DpmSourceForm.accdb: "Original EBA Access database (.accdb)",
+            DpmSourceForm.sqlite: "Pre-converted DPM database (.sqlite)",
+        }[self.dpm_source_form]
 
 
 class ReleaseSlot(enum.StrEnum):

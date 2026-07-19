@@ -11,7 +11,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.taxonomy.models import ArtifactStatus, ReleaseSlot, SnapshotStatus
+from app.taxonomy.models import (
+    ArtifactStatus,
+    DpmSourceForm,
+    ReleaseSlot,
+    SnapshotStatus,
+)
 
 
 class CapabilitySetOut(BaseModel):
@@ -52,6 +57,10 @@ class SnapshotOut(BaseModel):
     version_label: str
     original_filename: str
     checksum: str
+    # Provenance: whether the DPM came in as the original Access file or a
+    # pre-converted SQLite. Audit evidence, not a primary label.
+    dpm_source_form: DpmSourceForm
+    dpm_source_label: str
     status: SnapshotStatus
     error: str | None
     uploaded_at: datetime

@@ -32,6 +32,7 @@ from app.core.db import SessionLocal
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.taxonomy.models import (
     ArtifactStatus,
+    DpmSourceForm,
     Regulator,
     ReleaseArtifact,
     ReleaseSlot,
@@ -73,8 +74,9 @@ def _member_qname(signature: str) -> XmlQName | None:
 logger = logging.getLogger(__name__)
 
 # Files stored under each snapshot's data dir.
-SOURCE_FILENAME = "source.accdb"
-SQLITE_FILENAME = "dpm.sqlite"
+SOURCE_FILENAME = "source.accdb"  # original DPM when supplied as Access
+SOURCE_SQLITE_FILENAME = "source.sqlite"  # original DPM when supplied pre-converted
+SQLITE_FILENAME = "dpm.sqlite"  # the canonical query database (always present)
 
 # Tables projected from the Access release into the per-snapshot SQLite. The raw
 # .accdb is kept byte-for-byte, so this set can grow later without re-uploading.
@@ -174,8 +176,23 @@ def snapshot_dir(settings: Settings, snapshot_id: int) -> Path:
     return settings.snapshots_dir / str(snapshot_id)
 
 
-def _source_path(settings: Settings, snapshot_id: int) -> Path:
-    return snapshot_dir(settings, snapshot_id) / SOURCE_FILENAME
+def _source_path(
+    settings: Settings,
+    snapshot_id: int,
+    form: DpmSourceForm = DpmSourceForm.accdb,
+) -> Path:
+    """Path to the original DPM as uploaded, named by its input form.
+
+    The uploaded file is kept byte-for-byte for provenance and re-ingest: the
+    Access original as ``source.accdb``, a pre-converted database as
+    ``source.sqlite``. The derived query database is always ``dpm.sqlite``.
+    """
+    name = (
+        SOURCE_SQLITE_FILENAME
+        if form is DpmSourceForm.sqlite
+        else SOURCE_FILENAME
+    )
+    return snapshot_dir(settings, snapshot_id) / name
 
 
 def _sqlite_path(settings: Settings, snapshot_id: int) -> Path:
@@ -279,11 +296,13 @@ def convert_accdb_to_sqlite(
         conn.close()
 
 
-def validate_dpm_sqlite(sqlite_path: Path) -> None:
-    """Probe a converted snapshot; raise ``ValidationError`` if it isn't DPM."""
-    if not sqlite_path.exists():
-        raise ValidationError("converted snapshot database is missing")
-    conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+def _dpm_probe_error(conn: sqlite3.Connection) -> str | None:
+    """Return why ``conn`` isn't a readable DPM database, or ``None`` if it is.
+
+    A genuine converted DPM has the projected tables and a non-empty ``Release``
+    table. Shared by the finalize-time check and the upload-time verification of
+    a pre-converted SQLite so both apply exactly the same definition of "DPM".
+    """
     try:
         names = {
             r[0]
@@ -291,13 +310,28 @@ def validate_dpm_sqlite(sqlite_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        missing = [t for t in REQUIRED_TABLES if t not in names]
-        if missing:
-            raise ValidationError(
-                f"file is not a DPM database (missing tables: {', '.join(missing)})"
-            )
+    except sqlite3.DatabaseError:
+        return "the file is not a readable SQLite database"
+    missing = [t for t in REQUIRED_TABLES if t not in names]
+    if missing:
+        return f"missing DPM tables: {', '.join(missing)}"
+    try:
         if conn.execute("SELECT count(*) FROM Release").fetchone()[0] == 0:
-            raise ValidationError("DPM database contains no releases")
+            return "the DPM database contains no releases"
+    except sqlite3.DatabaseError:
+        return "the DPM Release table could not be read"
+    return None
+
+
+def validate_dpm_sqlite(sqlite_path: Path) -> None:
+    """Probe a converted snapshot; raise ``ValidationError`` if it isn't DPM."""
+    if not sqlite_path.exists():
+        raise ValidationError("converted snapshot database is missing")
+    conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+    try:
+        problem = _dpm_probe_error(conn)
+        if problem is not None:
+            raise ValidationError(f"file is not a DPM database ({problem})")
     finally:
         conn.close()
 
@@ -314,12 +348,15 @@ def register_snapshot(
     filename: str,
     version_label: str,
     regulator_id: int | None = None,
+    source_form: DpmSourceForm = DpmSourceForm.accdb,
     settings: Settings | None = None,
 ) -> TaxonomySnapshot:
     """Persist a new snapshot (status=ingesting) and store the uploaded file.
 
     Rejects a re-upload of identical bytes (duplicate checksum). ``regulator_id``
     defaults to the EBA — the platform's default taxonomy publisher.
+    ``source_form`` records whether the DPM arrived as the original Access file
+    or a pre-converted SQLite, and decides the stored original's filename.
     """
     settings = settings or get_settings()
     if not file_bytes:
@@ -344,6 +381,7 @@ def register_snapshot(
         version_label=version_label,
         original_filename=filename,
         checksum=checksum,
+        dpm_source_form=source_form,
         status=SnapshotStatus.ingesting,
     )
     db.add(snapshot)
@@ -352,9 +390,12 @@ def register_snapshot(
 
     directory = snapshot_dir(settings, snapshot.id)
     directory.mkdir(parents=True, exist_ok=True)
-    _source_path(settings, snapshot.id).write_bytes(file_bytes)
+    _source_path(settings, snapshot.id, source_form).write_bytes(file_bytes)
 
-    logger.info("registered snapshot id=%s checksum=%s", snapshot.id, checksum)
+    logger.info(
+        "registered snapshot id=%s checksum=%s form=%s",
+        snapshot.id, checksum, source_form.value,
+    )
     return snapshot
 
 
@@ -370,12 +411,16 @@ def ingest_snapshot(
     ``converter`` is injectable so ingestion can be tested without mdbtools.
     """
     settings = settings or get_settings()
-    source = _source_path(settings, snapshot.id)
+    source = _source_path(settings, snapshot.id, snapshot.dpm_source_form)
     target = _sqlite_path(settings, snapshot.id)
     try:
         if not source.exists():
             raise ValidationError("uploaded source file is missing")
-        converter(source, target, settings=settings)
+        if snapshot.dpm_source_form is DpmSourceForm.sqlite:
+            # Already a query database — no mdbtools conversion; adopt it as-is.
+            shutil.copyfile(source, target)
+        else:
+            converter(source, target, settings=settings)
         validate_dpm_sqlite(target)
     except Exception as exc:  # noqa: BLE001 — record any failure on the snapshot
         snapshot.status = SnapshotStatus.failed
@@ -407,6 +452,10 @@ def ingest_snapshot_task(snapshot_id: int) -> None:
 
 # Access databases (.accdb / .mdb) carry a Jet/ACE signature in their header.
 _ACCESS_SIGNATURES = (b"Standard Jet DB", b"Standard ACE DB")
+_ACCESS_SUFFIXES = (".accdb", ".mdb")
+# Every SQLite file begins with this 16-byte magic string.
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+_SQLITE_SUFFIXES = (".sqlite", ".sqlite3", ".db")
 
 
 def looks_like_access(data: bytes) -> bool:
@@ -414,29 +463,75 @@ def looks_like_access(data: bytes) -> bool:
     return any(sig in data[:1024] for sig in _ACCESS_SIGNATURES)
 
 
+def looks_like_sqlite(data: bytes) -> bool:
+    """Whether the bytes begin with the SQLite file magic."""
+    return data[:16] == _SQLITE_MAGIC
+
+
+def _verify_dpm_sqlite_bytes(data: bytes) -> None:
+    """Verify pre-converted SQLite bytes are a genuine converted DPM.
+
+    Beyond "is it SQLite", probe for the DPM tables + a non-empty ``Release`` so
+    an arbitrary SQLite file (or a mislabelled download) is rejected with a
+    plain-language message pointing back to the documented conversion.
+    """
+    if not looks_like_sqlite(data):
+        raise ValidationError(
+            "This .sqlite file is not a SQLite database. Supply the "
+            "dpm.sqlite produced by converting the EBA DPM 2.0 Access database "
+            "with the documented command."
+        )
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".sqlite") as tmp:
+        tmp.write(data)
+        tmp.flush()
+        conn = sqlite3.connect(f"file:{tmp.name}?mode=ro", uri=True)
+        try:
+            problem = _dpm_probe_error(conn)
+        finally:
+            conn.close()
+    if problem is not None:
+        raise ValidationError(
+            "This SQLite file is not a converted EBA DPM database "
+            f"({problem}). Convert the EBA DPM 2.0 Access database with the "
+            "documented command and upload the resulting dpm.sqlite."
+        )
+
+
 def verify_dpm_file(
     data: bytes, filename: str, *, verifier=looks_like_access
-) -> None:
-    """Verify an uploaded DPM database, or raise a plain-language error.
+) -> DpmSourceForm:
+    """Verify an uploaded DPM database and return its input form.
 
-    Messages name what was expected in EBA-website terms so a reporter knows
-    exactly which download to grab. ``verifier`` is injectable for tests.
+    Accepts either the original EBA DPM 2.0 Access file (``.accdb``/``.mdb``) or
+    a pre-converted DPM SQLite (``.sqlite``/``.db``). The Access form is checked
+    by its Jet/ACE signature; the SQLite form is probed for the DPM tables so
+    only a genuine converted DPM is accepted. Messages name what was expected in
+    EBA-website terms so a reporter knows exactly which download to grab.
+    ``verifier`` is injectable for tests (the Access-signature check).
     """
     if not data:
         raise ValidationError("The DPM database file is empty.")
-    if Path(filename).suffix.lower() not in (".accdb", ".mdb"):
-        raise ValidationError(
-            "This is not the EBA DPM database. On the EBA reporting-frameworks "
-            "page, download the DPM 2.0 database — a Microsoft Access file "
-            "(.accdb) — and upload that."
-        )
-    if not verifier(data):
-        raise ValidationError(
-            "This is not the EBA DPM database. The EBA DPM 2.0 download is a "
-            "Microsoft Access .accdb file; this file looks like something else "
-            "(a zip or spreadsheet). Upload the .accdb from the EBA "
-            "reporting-frameworks page."
-        )
+    suffix = Path(filename).suffix.lower()
+    if suffix in _ACCESS_SUFFIXES:
+        if not verifier(data):
+            raise ValidationError(
+                "This is not the EBA DPM database. The EBA DPM 2.0 download is "
+                "a Microsoft Access .accdb file; this file looks like something "
+                "else (a zip or spreadsheet). Upload the .accdb from the EBA "
+                "reporting-frameworks page."
+            )
+        return DpmSourceForm.accdb
+    if suffix in _SQLITE_SUFFIXES:
+        _verify_dpm_sqlite_bytes(data)
+        return DpmSourceForm.sqlite
+    raise ValidationError(
+        "This is not the EBA DPM database. Upload either the DPM 2.0 database "
+        "from the EBA reporting-frameworks page — a Microsoft Access file "
+        "(.accdb) — or, if that file is too large to upload, a pre-converted "
+        "DPM database (.sqlite) made with the documented conversion command."
+    )
 
 
 def create_release(
@@ -472,7 +567,7 @@ def create_release(
         raise ValidationError('A version label is required (for example "4.2").')
 
     # Verify all three up front — persist nothing unless every one is valid.
-    verify_dpm_file(dpm_bytes, dpm_filename, verifier=dpm_verifier)
+    source_form = verify_dpm_file(dpm_bytes, dpm_filename, verifier=dpm_verifier)
     _artifacts.verify_taxonomy_package(taxonomy_bytes, taxonomy_filename)
     _rules.verify_workbook_file(rules_bytes, rules_filename)
 
@@ -483,6 +578,7 @@ def create_release(
         filename=dpm_filename,
         version_label=label,
         regulator_id=regulator_id,
+        source_form=source_form,
         settings=settings,
     )
     try:
@@ -683,7 +779,7 @@ def reingest_snapshot(
     """
     settings = settings or get_settings()
     snapshot = get_snapshot(db, snapshot_id)
-    if not _source_path(settings, snapshot.id).exists():
+    if not _source_path(settings, snapshot.id, snapshot.dpm_source_form).exists():
         raise ValidationError(
             f"cannot re-ingest snapshot id={snapshot.id}: its original file is "
             "not on disk at the configured storage root — re-upload it instead"
