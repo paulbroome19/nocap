@@ -148,6 +148,13 @@ deliberate action**:
 The system never silently substitutes a dependency and never silently proceeds
 against a missing one.
 
+**Reselection and instance identity.** The entity is part of an instance's
+identity; the taxonomy release is not. So reselecting a **deleted entity**
+produces a **new instance** (the replacement entity defines a different
+instance) — the new execution does not appear under the old instance's history.
+Reselecting a **deleted or replaced release keeps the same instance** — it is a
+new execution of the same instance, bound to the current release.
+
 ---
 
 ## Interaction rules

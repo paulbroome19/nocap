@@ -135,10 +135,17 @@ class RunCreate(BaseModel):
 
 
 class ReexecuteRequest(BaseModel):
-    """Body for re-executing an instance. ``acknowledge_changes`` must be true to
-    proceed when the entity or release has changed since the last execution."""
+    """Body for re-executing an instance.
+
+    When the entity or release has changed since the last execution, resolve it
+    by either choosing a current dependency (``entity_id`` / ``release_snapshot_id``)
+    or, for a still-usable change, ``acknowledge_changes=True``. A vanished
+    dependency must be reselected.
+    """
 
     acknowledge_changes: bool = False
+    entity_id: int | None = None  # a replacement entity
+    release_snapshot_id: int | None = None  # a replacement release (snapshot)
 
 
 class RunOut(BaseModel):

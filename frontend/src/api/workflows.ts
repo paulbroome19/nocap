@@ -337,24 +337,36 @@ export class DependencyChangedError extends Error {
   }
 }
 
+/** How to resolve a changed dependency when re-executing. */
+export interface ReexecuteOptions {
+  acknowledge?: boolean // proceed with a still-usable changed dependency
+  entityId?: number // choose a replacement entity (for a deleted entity)
+  releaseSnapshotId?: number // choose a replacement release (for a deleted one)
+}
+
 /**
  * Re-execute / resubmit an existing instance (full resubmission). Creates a new
- * run carrying the source run's instance identity (entity, date, keys); the
- * caller then attaches a fact file and executes it.
+ * run carrying the source run's instance identity; the caller then attaches a
+ * fact file and executes it.
  *
  * If the entity or taxonomy release has changed since the last execution, the
  * server responds 409 and this throws {@link DependencyChangedError} with the
- * list of changes — never re-binding silently. Retry with `acknowledge = true`
- * once the user has confirmed.
+ * list of changes — never re-binding silently. Retry with a replacement
+ * (`entityId` / `releaseSnapshotId`) or, for a still-usable change,
+ * `acknowledge: true`.
  */
 export async function reexecuteRun(
   runId: number,
-  acknowledge = false,
+  opts: ReexecuteOptions = {},
 ): Promise<Run> {
   const res = await fetch(`/api/workflows/runs/${runId}/reexecute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ acknowledge_changes: acknowledge }),
+    body: JSON.stringify({
+      acknowledge_changes: opts.acknowledge ?? false,
+      entity_id: opts.entityId ?? null,
+      release_snapshot_id: opts.releaseSnapshotId ?? null,
+    }),
   })
   if (res.status === 409) {
     const body = await res.json().catch(() => null)
