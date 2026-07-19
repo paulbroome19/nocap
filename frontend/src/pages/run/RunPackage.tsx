@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { downloadRunFile, type RunFile } from '../../api/workflows'
 import {
-  Card,
+  Block,
   EmptyState,
   ErrorText,
   PageHeader,
-  primaryBtn,
+  SectionLabel,
+  secondaryBtn,
 } from '../../components/ui'
 import { formatDate } from '../../lib/format'
 import { runCrumbs, useRun } from './context'
@@ -45,32 +46,32 @@ export default function RunPackage() {
   }
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-8">
       <PageHeader crumbs={runCrumbs(ctx, 'Package')} title="Package" />
 
       <ErrorText>{error}</ErrorText>
 
-      <Card className="p-5">
+      <Block className="p-6">
         {pkg ? (
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
-              <div className="truncate font-mono text-sm text-slate-800">
+              <div className="truncate font-mono text-[14px] text-data">
                 {pkg.filename}
               </div>
-              <div className="mt-0.5 text-xs text-slate-400">
+              <div className="mt-0.5 text-[12px] text-muted">
                 {bytes(pkg.size_bytes)}
               </div>
             </div>
             {pkg.available ? (
               <button
                 type="button"
-                className={primaryBtn}
+                className={secondaryBtn}
                 onClick={() => void download(pkg)}
               >
                 Download package
               </button>
             ) : (
-              <span className="rounded-md bg-slate-100 px-4 py-1.5 text-sm font-medium text-slate-400">
+              <span className="rounded-[9px] bg-canvas px-4 py-1.5 text-[13px] font-medium text-muted">
                 Unavailable
               </span>
             )}
@@ -78,52 +79,52 @@ export default function RunPackage() {
         ) : (
           <EmptyState>No package was generated for this run.</EmptyState>
         )}
-      </Card>
+      </Block>
 
       <div>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          All files
-        </h2>
-        <Card className="overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                <th className="px-4 py-2.5 font-medium">Role</th>
-                <th className="px-4 py-2.5 font-medium">File</th>
-                <th className="px-4 py-2.5 font-medium">Added</th>
-                <th className="px-4 py-2.5 text-right font-medium">Download</th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((f) => (
-                <tr key={f.id} className="border-b border-slate-100 last:border-0">
-                  <td className="px-4 py-2 text-xs text-slate-600">
-                    {ROLE_LABEL[f.role] ?? f.role}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-700">
-                    {f.filename}
-                  </td>
-                  <td className="px-4 py-2 text-xs tabular-nums text-slate-400">
-                    {formatDate(f.created_at)}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {f.available ? (
-                      <button
-                        type="button"
-                        className="text-xs font-medium text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
-                        onClick={() => void download(f)}
-                      >
-                        Download
-                      </button>
-                    ) : (
-                      <span className="text-xs text-slate-300">unavailable</span>
-                    )}
-                  </td>
+        <SectionLabel>All files</SectionLabel>
+        <Block className="mt-2.5 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-divider text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+                  <th className="px-6 py-2.5 font-semibold">Role</th>
+                  <th className="px-6 py-2.5 font-semibold">File</th>
+                  <th className="px-6 py-2.5 font-semibold">Added</th>
+                  <th className="px-6 py-2.5 text-right font-semibold">Download</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+              </thead>
+              <tbody>
+                {files.map((f) => (
+                  <tr key={f.id} className="border-t border-divider first:border-t-0">
+                    <td className="px-6 py-2.5 text-sub">
+                      {ROLE_LABEL[f.role] ?? f.role}
+                    </td>
+                    <td className="px-6 py-2.5 font-mono text-[12px] text-data">
+                      {f.filename}
+                    </td>
+                    <td className="px-6 py-2.5 tabular-nums text-muted">
+                      {formatDate(f.created_at)}
+                    </td>
+                    <td className="px-6 py-2.5 text-right">
+                      {f.available ? (
+                        <button
+                          type="button"
+                          className="text-[13px] font-medium text-sub underline-offset-2 hover:text-data hover:underline"
+                          onClick={() => void download(f)}
+                        >
+                          Download
+                        </button>
+                      ) : (
+                        <span className="text-[12px] text-faint">unavailable</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Block>
       </div>
     </section>
   )

@@ -10,12 +10,13 @@ import {
 import DeclControl from '../components/DeclControl'
 import EwcSelectors, { type EwcTarget } from '../components/EwcSelectors'
 import {
-  Card,
+  Block,
   EmptyState,
   ErrorText,
   PageHeader,
+  SectionLabel,
   Skeleton,
-  primaryBtn,
+  secondaryBtn,
 } from '../components/ui'
 
 export default function FilingIndicators() {
@@ -66,7 +67,6 @@ export default function FilingIndicators() {
     setError(null)
     setSaving(true)
     try {
-      // Preserve the parameters set on the other screen.
       await updateEntityWorkflowConfig(target.entityId, target.workflowId, {
         indicator_declarations: declarations,
         base_currency: config.base_currency,
@@ -80,30 +80,26 @@ export default function FilingIndicators() {
     }
   }
 
-  const declaredCount = Object.keys(declarations).length
-
   return (
     <section>
       <PageHeader
-        crumbs={[
-          { label: 'Reference Data', to: '/reference' },
-          { label: 'Filing Indicators' },
-        ]}
+        crumbs={[{ label: 'Reference Data', to: '/reference' }, { label: 'Filing Indicators' }]}
         title="Filing Indicators"
         subtitle="Per entity and reporting suite, declare each template Required, Optional (default, derived from facts), or Not required."
       />
 
-      <Card className="mb-6 p-5">
+      <SectionLabel>Target</SectionLabel>
+      <Block className="mb-8 p-6">
         <EwcSelectors onChange={onChange} onNoRelease={onNoRelease} />
-      </Card>
+      </Block>
 
       <ErrorText>{error}</ErrorText>
 
       {!target ? (
         noRelease ? (
           <EmptyState>
-            The selected regulator has no ready taxonomy release, so its
-            templates can’t be listed. Onboard one under Taxonomies first.
+            The selected regulator has no usable taxonomy release, so its
+            templates can’t be listed. Add one under Taxonomies first.
           </EmptyState>
         ) : (
           <EmptyState>Choose an entity, regulator, and suite to begin.</EmptyState>
@@ -114,48 +110,33 @@ export default function FilingIndicators() {
         <EmptyState>No templates in this suite.</EmptyState>
       ) : (
         <>
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs text-slate-400">
-              {declaredCount} declared · {templates.length} templates
-            </p>
-            <div className="flex items-center gap-3">
-              {saved && <span className="text-xs text-emerald-600">Saved</span>}
-              <button
-                type="button"
-                onClick={() => void save()}
-                disabled={saving}
-                className={primaryBtn}
-              >
+          <div className="mb-2.5 flex items-center justify-between">
+            <SectionLabel>Templates</SectionLabel>
+            <div className="flex items-center gap-4">
+              {saved && <span className="text-[13px] text-sub">Saved</span>}
+              <button type="button" onClick={() => void save()} disabled={saving} className={secondaryBtn}>
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
           </div>
-          <Card className="overflow-hidden">
-            <table className="w-full text-sm">
-              <tbody>
-                {templates.map((t) => (
-                  <tr
-                    key={t.code}
-                    className="border-b border-slate-100 last:border-0"
-                  >
-                    <td className="px-4 py-2.5">
-                      <span className="font-mono text-xs text-slate-700">
-                        {t.code}
-                      </span>
-                      <span className="ml-3 text-xs text-slate-400">{t.name}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <DeclControl
-                        value={declarations[t.code] ?? 'optional'}
-                        onChange={(v) => setDecl(t.code, v)}
-                        disabled={saving}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          <Block>
+            {templates.map((t) => (
+              <div
+                key={t.code}
+                className="flex items-center justify-between gap-4 border-t border-divider px-6 py-4 first:border-t-0"
+              >
+                <div className="min-w-0">
+                  <span className="font-mono text-[13px] text-data">{t.code}</span>
+                  <span className="ml-3 text-[13px] text-muted">{t.name}</span>
+                </div>
+                <DeclControl
+                  value={declarations[t.code] ?? 'optional'}
+                  onChange={(v) => setDecl(t.code, v)}
+                  disabled={saving}
+                />
+              </div>
+            ))}
+          </Block>
         </>
       )}
     </section>

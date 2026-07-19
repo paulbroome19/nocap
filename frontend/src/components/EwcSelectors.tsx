@@ -10,7 +10,7 @@ import {
   type Entity,
   type WorkflowConfig,
 } from '../api/workflows'
-import { Select } from './ui'
+import { FieldLabel, Select } from './ui'
 
 export interface EwcTarget {
   entityId: number
@@ -75,45 +75,30 @@ export default function EwcSelectors({
 
   return (
     <div className="grid gap-4 sm:grid-cols-3">
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-slate-600">Entity</span>
-        <Select
-          value={entityId}
-          onChange={(v) => setEntityId(v === '' ? '' : Number(v))}
-        >
+      <label className="block">
+        <FieldLabel>Entity</FieldLabel>
+        <Select value={entityId} onChange={(v) => setEntityId(v === '' ? '' : Number(v))}>
           <option value="">Select…</option>
           {entities.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.name} · {e.lei}
-            </option>
+            <option key={e.id} value={e.id}>{e.name} · {e.lei}</option>
           ))}
         </Select>
       </label>
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-slate-600">Regulator</span>
-        <Select
-          value={regulatorId}
-          onChange={(v) => setRegulatorId(v === '' ? '' : Number(v))}
-        >
+      <label className="block">
+        <FieldLabel>Regulator</FieldLabel>
+        <Select value={regulatorId} onChange={(v) => setRegulatorId(v === '' ? '' : Number(v))}>
           <option value="">Select…</option>
           {regulators.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
+            <option key={r.id} value={r.id}>{r.name}</option>
           ))}
         </Select>
       </label>
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-slate-600">Reporting suite</span>
-        <Select
-          value={workflowId}
-          onChange={(v) => setWorkflowId(v === '' ? '' : Number(v))}
-        >
+      <label className="block">
+        <FieldLabel>Reporting suite</FieldLabel>
+        <Select value={workflowId} onChange={(v) => setWorkflowId(v === '' ? '' : Number(v))}>
           <option value="">Select…</option>
           {suites.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
+            <option key={w.id} value={w.id}>{w.name}</option>
           ))}
         </Select>
       </label>
