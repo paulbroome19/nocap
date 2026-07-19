@@ -193,37 +193,60 @@ export default function ReleaseDetail() {
         ))}
       </div>
 
-      {/* What this release provides for each enabled suite, and what's new. */}
+      {/* What this release provides for each enabled suite — a permanent part of
+          the release detail view, shown whenever the release is opened. */}
       {provisions && provisions.provisions.length > 0 && (
         <div className="mt-8">
           <SectionLabel>What this release provides</SectionLabel>
           <Block className="mt-2.5 overflow-hidden">
-            {provisions.provisions.map((p) => (
-              <div
-                key={p.module_code}
-                className="flex items-center justify-between gap-4 border-t border-divider px-6 py-3.5 first:border-t-0"
-              >
-                <span className="text-[14px] text-ink">{p.workflow_name}</span>
-                {p.module_version === null ? (
-                  <span className="text-[13px] text-muted">Not in this release</span>
-                ) : (
-                  <span className="flex items-center gap-2.5 text-[13px]">
-                    <span className="font-mono text-data">
-                      module version {p.module_version}
-                    </span>
-                    {p.is_new ? (
-                      <span className="rounded-[5px] bg-ink px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-white">
-                        New
-                      </span>
-                    ) : (
-                      <span className="text-muted">
-                        already available from {p.already_from}
-                      </span>
-                    )}
-                  </span>
-                )}
-              </div>
-            ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-divider text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+                    <th className="px-6 py-2.5 font-semibold">Reporting suite</th>
+                    <th className="px-6 py-2.5 font-semibold">Taxonomy version</th>
+                    <th className="px-6 py-2.5 font-semibold">Module version</th>
+                    <th className="px-6 py-2.5 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {provisions.provisions.map((p) => {
+                    const absent = p.module_version === null
+                    return (
+                      <tr
+                        key={p.module_code}
+                        className="border-t border-divider first:border-t-0"
+                      >
+                        <td className="px-6 py-3 text-ink">{p.workflow_name}</td>
+                        <td className="px-6 py-3 font-mono text-data">
+                          {/* The taxonomy version appears on every row. */}
+                          {absent ? '—' : provisions.taxonomy_version}
+                        </td>
+                        <td className="px-6 py-3 font-mono text-data">
+                          {absent ? '—' : p.module_version}
+                        </td>
+                        <td className="px-6 py-3">
+                          {absent ? (
+                            <span className="text-muted">Not in this release</span>
+                          ) : provisions.is_first_release ? (
+                            // First release loaded — nothing to compare against.
+                            <span className="text-muted">—</span>
+                          ) : p.is_new ? (
+                            <span className="rounded-[5px] bg-ink px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-white">
+                              New
+                            </span>
+                          ) : (
+                            <span className="text-muted">
+                              Already available from {p.already_from}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </Block>
         </div>
       )}

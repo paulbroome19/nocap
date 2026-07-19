@@ -289,8 +289,9 @@ class ModuleVersionOptions(BaseModel):
 
 class ReleaseProvision(BaseModel):
     """What a release provides for one enabled reporting suite, and whether that
-    is new to the estate. ``already_from`` names the earliest release that first
-    provided this same version (present only when not new)."""
+    is new to the estate. ``already_from`` names the earliest release's taxonomy
+    version that first provided this same module version (present only when not
+    new and this is not the first release loaded)."""
 
     module_code: str
     module_name: str | None
@@ -298,11 +299,17 @@ class ReleaseProvision(BaseModel):
     module_version: str | None  # None when the release doesn't contain the module
     framework_version: str | None
     is_new: bool
-    already_from: str | None
+    already_from: str | None  # the taxonomy version it was first available from
 
 
 class ReleaseProvisionsSummary(BaseModel):
-    """The ingestion summary: per enabled suite, what this release provides."""
+    """What a release provides, per enabled suite — the release detail page's
+    permanent 'What this release provides' table (not only shown post-ingest)."""
 
     snapshot_id: int
+    # The release's own taxonomy version (e.g. "4.2.1") — shown on every row.
+    taxonomy_version: str
+    # True when no earlier release has been loaded: there's nothing to compare
+    # against, so "new" is suppressed rather than marking every row NEW.
+    is_first_release: bool
     provisions: list[ReleaseProvision]

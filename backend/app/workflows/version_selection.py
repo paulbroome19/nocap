@@ -119,6 +119,11 @@ def release_provisions_summary(
         )
     )
     ready = _ready_snapshots(db)
+    snapshot = ready.get(snapshot_id) or db.get(TaxonomySnapshot, snapshot_id)
+    taxonomy_version = snapshot.version_label if snapshot is not None else ""
+    # No earlier release loaded → nothing to compare against, so don't mark
+    # every row NEW; the UI suppresses the status badge entirely.
+    is_first_release = not any(sid < snapshot_id for sid in ready)
 
     provisions: list[ReleaseProvision] = []
     for wf in active:
@@ -166,8 +171,14 @@ def release_provisions_summary(
                 module_version=this.module_version,
                 framework_version=this.framework_version,
                 is_new=earliest is None,
-                already_from=earliest.display_name if earliest else None,
+                # Lead with the taxonomy version, not the display name.
+                already_from=earliest.version_label if earliest else None,
             )
         )
 
-    return ReleaseProvisionsSummary(snapshot_id=snapshot_id, provisions=provisions)
+    return ReleaseProvisionsSummary(
+        snapshot_id=snapshot_id,
+        taxonomy_version=taxonomy_version,
+        is_first_release=is_first_release,
+        provisions=provisions,
+    )
