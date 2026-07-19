@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { getEntity, updateEntity, type Entity } from '../api/workflows'
+import { useNavigate, useParams } from 'react-router-dom'
+import {
+  deleteEntity,
+  getEntity,
+  updateEntity,
+  type Entity,
+} from '../api/workflows'
 import EntityForm from '../components/EntityForm'
 import {
   Card,
@@ -13,10 +18,30 @@ import {
 export default function EntityDetail() {
   const { entityId } = useParams()
   const id = Number(entityId)
+  const navigate = useNavigate()
 
   const [entity, setEntity] = useState<Entity | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  async function handleDelete() {
+    if (!entity) return
+    const message =
+      `Delete ${entity.name}?\n\n` +
+      'This removes the entity and its per-workflow configuration. Runs already ' +
+      'produced for it are unaffected — they keep the values they used. This ' +
+      'cannot be undone.'
+    if (!window.confirm(message)) return
+    setBusy(true)
+    try {
+      await deleteEntity(id)
+      navigate('/reference/entities')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
 
   const loadEntity = useCallback(() => {
     getEntity(id)
@@ -48,13 +73,23 @@ export default function EntityDetail() {
         title={entity.name}
         actions={
           !editing && (
-            <button
-              type="button"
-              className={secondaryBtn}
-              onClick={() => setEditing(true)}
-            >
-              Edit
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className={secondaryBtn}
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                className={`${secondaryBtn} text-red-600 hover:bg-red-50 disabled:opacity-50`}
+                onClick={() => void handleDelete()}
+              >
+                {busy ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
           )
         }
       />

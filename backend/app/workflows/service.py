@@ -16,7 +16,7 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -246,6 +246,26 @@ def update_entity(
     db.commit()
     db.refresh(entity)
     return entity
+
+
+def delete_entity(db: Session, entity_id: int) -> None:
+    """Delete an entity — a live reference-data row (freely deletable).
+
+    Its per-(entity, workflow) configuration is removed with it. Runs are
+    unaffected: each froze the entity's values (name, LEI, scope, country) at
+    execution and keeps them; the run's ``entity_id`` remains as historical
+    provenance (now pointing at a deleted entity), so a later re-execution can
+    detect the entity is gone and ask for a current one.
+    """
+    entity = get_entity(db, entity_id)
+    db.execute(
+        delete(EntityWorkflowConfig).where(
+            EntityWorkflowConfig.entity_id == entity_id
+        )
+    )
+    db.delete(entity)
+    db.commit()
+    logger.info("deleted entity id=%s", entity_id)
 
 
 # --- per-(entity, workflow) configuration ----------------------------------
@@ -731,6 +751,27 @@ def get_run(db: Session, run_id: int) -> Run:
     if run is None:
         raise NotFoundError(f"run id={run_id} not found")
     return run
+
+
+def delete_run(
+    db: Session, run_id: int, *, settings: Settings | None = None
+) -> None:
+    """Delete an execution and everything it produced.
+
+    Removes the run's facts, validation findings, and stored files (rows + the
+    on-disk directory), then the run itself. Other executions of the same
+    instance are untouched. (When sign-off lands, a signed-off run can never be
+    deleted — a future guard.)
+    """
+    settings = settings or get_settings()
+    get_run(db, run_id)  # 404 if unknown
+    db.execute(delete(Fact).where(Fact.run_id == run_id))
+    db.execute(delete(ValidationFinding).where(ValidationFinding.run_id == run_id))
+    db.execute(delete(RunFile).where(RunFile.run_id == run_id))
+    db.execute(delete(Run).where(Run.id == run_id))
+    db.commit()
+    facts.remove_run_dir(settings, run_id)
+    logger.info("deleted run id=%s", run_id)
 
 
 def list_runs(db: Session, workflow_id: int) -> list[Run]:

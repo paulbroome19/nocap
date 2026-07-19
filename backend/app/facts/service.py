@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import shutil
 import uuid
 from datetime import date
 from pathlib import Path
@@ -45,6 +46,11 @@ def compute_checksum(data: bytes) -> str:
 
 def _run_dir(settings: Settings, run_id: int) -> Path:
     return settings.data_dir / "runs" / str(run_id)
+
+
+def remove_run_dir(settings: Settings, run_id: int) -> None:
+    """Delete a run's on-disk directory (all its stored files). Idempotent."""
+    shutil.rmtree(_run_dir(settings, run_id), ignore_errors=True)
 
 
 def _storage_name(filename: str) -> str:

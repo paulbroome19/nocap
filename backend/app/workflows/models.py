@@ -4,8 +4,10 @@
   at. Module codes resolve against a snapshot at run time, so a config does not
   depend on any snapshot existing.
 - ``Run`` — one execution of a workflow against a specific snapshot + release,
-  for an entity and reference date. Runs are never deleted; their status tracks
-  the lifecycle created → files_attached → running → generated / failed.
+  for an entity and reference date. Its status tracks the lifecycle
+  created → files_attached → running → generated / failed. A run may be deleted
+  from its own page (PRODUCT.md); history is a view over what remains. (When
+  sign-off lands, a signed-off run becomes immutable and can never be deleted.)
 """
 
 from __future__ import annotations
@@ -216,11 +218,14 @@ class Run(Base):
     # creation so a later rename/edit/deletion of the entity never alters this
     # historical execution — surfaces read these, never the live Entity row.
     entity_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("entity.id"), nullable=True
+        Integer, nullable=True, index=True
     )
     # Nullable only for rows created before the freeze (backfilled from the
     # entity at migration time; see the migration note). New runs always set it.
     entity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # No FK (like snapshot_id): the entity is a live reference row that may be
+    # deleted, while the run keeps its frozen entity_name/lei/scope/country. The
+    # id remains as historical provenance (may point at a since-deleted entity).
     entity_lei: Mapped[str] = mapped_column(String(64))
     # Scope is taken from the entity record at creation (no per-run input).
     entity_scope: Mapped[str] = mapped_column(String(16))  # IND | CON
