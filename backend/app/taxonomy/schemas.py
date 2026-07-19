@@ -7,7 +7,7 @@ Two groups: registry API shapes (``SnapshotOut``) and the lookup contract DTOs
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -108,6 +108,18 @@ class ModuleMetadata(BaseModel):
     framework_code: str
     module_version: str  # e.g. "3.3.0"
     name: str
+
+
+class ModuleProvision(BaseModel):
+    """A module version a release provides, current at its own release. The
+    reference-date window is the DPM's ModuleVersion.From/ToReferenceDate."""
+
+    module_code: str
+    framework_code: str
+    module_version: str  # ModuleVersion.VersionNumber, e.g. "3.3.0"
+    name: str | None
+    valid_from: date | None
+    valid_to: date | None
 
 
 class DatapointResolution(BaseModel):

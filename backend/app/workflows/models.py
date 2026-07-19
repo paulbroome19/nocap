@@ -266,6 +266,21 @@ class Run(Base):
     # reproducibility (capabilities are otherwise derived on read, never stored).
     capabilities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # The taxonomy version this run was executed against, frozen at creation. The
+    # user selects a module version; these record the exact version that governed
+    # generation and rule scoping, so history is reproducible even after later
+    # releases change what a module provides. Null on runs created before this
+    # feature (the release_id still resolves them live for display).
+    module_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    framework_version: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+
+    # The validation-rule set applied, frozen when validation runs, so the report
+    # can state it plainly: {count, module_code, module_version, framework_version,
+    # reference_date}. Null until validation runs.
+    rule_scope: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # A content fingerprint of the bound release's artifacts (DPM + slot
     # checksums) at creation. A new execution of the same instance compares the
     # release's current fingerprint against this to detect that an artifact was

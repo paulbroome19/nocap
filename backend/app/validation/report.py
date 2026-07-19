@@ -83,6 +83,7 @@ def build_report_html(
     identity: Sequence[tuple[str, str]],
     register: Sequence[RegisterRow],
     formula: dict | None,
+    scope_statement: str | None = None,
 ) -> str:
     """Assemble the full HTML validation report (mirrors the register UI)."""
     failed = sum(1 for r in register if r.result == "FAILED")
@@ -90,6 +91,11 @@ def build_report_html(
     submittable = failed == 0
     verdict = "Submittable" if submittable else "Not submittable — validation failed"
     verdict_cls = "ok" if submittable else "bad"
+    scope_html = (
+        f'\n<p class="scope">{escape(scope_statement)}</p>'
+        if scope_statement
+        else ""
+    )
 
     identity_rows = "\n".join(
         f"<tr><th>{escape(k)}</th><td>{escape(v)}</td></tr>" for k, v in identity
@@ -123,12 +129,13 @@ def build_report_html(
   .result.pass {{ color: #166534; }} .result.warn {{ color: #b45309; }}
   .result.fail {{ color: #991b1b; }} .result.note {{ color: #0369a1; }}
   .muted {{ color: #94a3b8; }}
+  .scope {{ color: #475569; margin: .35rem 0 0; }}
 </style>
 </head>
 <body>
 <h1>NoCap — Validation Report</h1>
 <p><span class="banner {verdict_cls}">{escape(verdict)}</span>
-  &nbsp; {failed} failed, {warned} warning(s), {len(register)} rules</p>
+  &nbsp; {failed} failed, {warned} warning(s), {len(register)} rules</p>{scope_html}
 
 <h2>Run identity</h2>
 <table class=kv>{identity_rows}</table>

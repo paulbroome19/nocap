@@ -23,6 +23,7 @@ import shutil
 import sqlite3
 import subprocess
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy import delete, func, select
@@ -41,6 +42,7 @@ from app.taxonomy.models import (
     DpmSourceForm,
     Regulator,
     ReleaseArtifact,
+    ReleaseModule,
     ReleaseSlot,
     SnapshotStatus,
     TaxonomySnapshot,
@@ -49,6 +51,7 @@ from app.taxonomy.models import (
 from app.taxonomy.schemas import (
     DatapointResolution,
     ModuleMetadata,
+    ModuleProvision,
     TemplateInfo,
     XmlMember,
     XmlQName,
@@ -533,6 +536,9 @@ def ingest_snapshot(
     settings = settings or get_settings()
     try:
         _convert_dpm(db, snapshot, settings=settings, converter=converter)
+        # Rebuild the provided-modules record too (re-ingest rebuilds derived
+        # state; the DPM's current modules may have been what was recovered).
+        record_release_modules(db, snapshot, settings=settings)
     except Exception as exc:  # noqa: BLE001 — record any failure on the snapshot
         snapshot.status = SnapshotStatus.failed
         snapshot.error = str(exc)[:2000]
@@ -844,6 +850,47 @@ def set_release_load_verifier(fn: _ReleaseLoadVerifier | None) -> None:
     _release_load_verifier = fn
 
 
+def record_release_modules(
+    db: Session, snapshot: TaxonomySnapshot, *, settings: Settings | None = None
+) -> int:
+    """Record the modules this release provides — the versions current at the
+    DPM's own ``IsCurrent`` release — into ``release_module``. Returns the count.
+
+    Reads the converted DPM directly (the snapshot is still ``ingesting`` during
+    creation, so ``open_lookup`` — which requires ``ready`` — can't be used).
+    Idempotent: clears any prior rows for the snapshot first (re-ingest rebuilds).
+    """
+    settings = settings or get_settings()
+    sqlite_path = _sqlite_path(settings, snapshot.id)
+    with TaxonomyLookup(sqlite_path) as lk:
+        rid = lk.default_release_id()
+        fw_version = framework_version(lk.release_code(rid))
+        provisions = lk.current_modules(release_id=rid)
+
+    db.execute(
+        delete(ReleaseModule).where(ReleaseModule.snapshot_id == snapshot.id)
+    )
+    for p in provisions:
+        db.add(
+            ReleaseModule(
+                snapshot_id=snapshot.id,
+                module_code=p.module_code,
+                framework_code=p.framework_code,
+                module_name=p.name,
+                module_version=p.module_version,
+                framework_version=fw_version or "",
+                valid_from=p.valid_from,
+                valid_to=p.valid_to,
+            )
+        )
+    db.commit()
+    logger.info(
+        "recorded %d provided module(s) for release id=%s (framework %s)",
+        len(provisions), snapshot.id, fw_version,
+    )
+    return len(provisions)
+
+
 def finalize_release(
     db: Session,
     snapshot: TaxonomySnapshot,
@@ -866,6 +913,9 @@ def finalize_release(
 
     try:
         _convert_dpm(db, snapshot, settings=settings, converter=converter)
+        # Record the modules this release provides (current at its own release),
+        # so the version selector and ingestion summary read from them.
+        record_release_modules(db, snapshot, settings=settings)
         _rules.ingest_validation_rules(db, snapshot, settings=settings)
         rules_art = db.scalar(
             select(ReleaseArtifact).where(
@@ -983,6 +1033,9 @@ def _purge_release(
     snapshot_id = snapshot.id
     db.execute(
         delete(ValidationRule).where(ValidationRule.snapshot_id == snapshot_id)
+    )
+    db.execute(
+        delete(ReleaseModule).where(ReleaseModule.snapshot_id == snapshot_id)
     )
     db.execute(
         delete(ReleaseArtifact).where(ReleaseArtifact.snapshot_id == snapshot_id)
@@ -1189,6 +1242,20 @@ WHERE mv.Code = :module AND {_RELEASE_VALID.format(a="mv")}
 LIMIT 1
 """
 
+# Every module *current at* a release — the modules that release provides. The
+# release-validity window keeps only versions live at the bound release, not the
+# DPM's full history. FromReferenceDate/ToReferenceDate give each version's
+# reference-date applicability window (varchar dates in the DPM).
+_CURRENT_MODULES_SQL = f"""
+SELECT mv.Code, f.Code, mv.VersionNumber, mv.Name,
+       mv.FromReferenceDate, mv.ToReferenceDate
+FROM ModuleVersion mv
+JOIN Module m ON m.ModuleID = mv.ModuleID
+JOIN Framework f ON f.FrameworkID = m.FrameworkID
+WHERE {_RELEASE_VALID.format(a="mv")}
+ORDER BY f.Code, mv.Code
+"""
+
 # Templates in a module that the DPM marks as open/keyed (TableVersion.KeyID set).
 # v1 generates closed tables only; open tables are guarded out.
 _OPEN_TEMPLATES_SQL = f"""
@@ -1200,6 +1267,33 @@ WHERE mv.Code = :module AND tv.KeyID IS NOT NULL
   AND {_RELEASE_VALID.format(a="mv")}
   AND {_RELEASE_VALID.format(a="tv")}
 """
+
+
+def framework_version(release_code: str | None) -> str | None:
+    """The framework taxonomy version (major.minor) of a DPM release code.
+
+    EBA versions the taxonomy at the framework level (X.Y, e.g. "4.2"); a DPM
+    revision (X.Y.Z, e.g. "4.2.1") reuses that framework taxonomy. This is the
+    version segment of the entry point and part of the module-selection dedup
+    key. Mirrors ``generation.framework_taxonomy_version`` (kept here so the
+    taxonomy stage does not import generation)."""
+    if not release_code:
+        return None
+    parts = release_code.split(".")
+    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+        return f"{parts[0]}.{parts[1]}"
+    return release_code
+
+
+def _parse_dpm_date(value: object) -> date | None:
+    """Parse a DPM reference-date cell ("YYYY-MM-DD" varchar) to a date, or None."""
+    if not value:
+        return None
+    text = str(value).strip()[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
 
 
 class TaxonomyLookup:
@@ -1391,6 +1485,26 @@ class TaxonomyLookup:
             "SELECT Code FROM Release WHERE ReleaseID = ?", (release_id,)
         ).fetchone()
         return None if row is None else str(row[0])
+
+    def current_modules(
+        self, *, release_id: int | None = None
+    ) -> list[ModuleProvision]:
+        """Every module a release provides — the versions current at the bound
+        release (default: the DPM's own ``IsCurrent`` release), not the full
+        history. This is what a release records at ingest as selectable."""
+        rid = release_id if release_id is not None else self.default_release_id()
+        rows = self._conn.execute(_CURRENT_MODULES_SQL, {"rid": rid}).fetchall()
+        return [
+            ModuleProvision(
+                module_code=r[0],
+                framework_code=r[1],
+                module_version=r[2],
+                name=r[3],
+                valid_from=_parse_dpm_date(r[4]),
+                valid_to=_parse_dpm_date(r[5]),
+            )
+            for r in rows
+        ]
 
 
 def open_lookup(

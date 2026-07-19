@@ -558,11 +558,18 @@ def create_run(
 
     with taxonomy.open_lookup(snapshot, settings=settings) as lk:
         rid = release_id if release_id is not None else lk.default_release_id()
-        if lk.module_metadata(wf.module_code, release_id=rid) is None:
+        meta = lk.module_metadata(wf.module_code, release_id=rid)
+        if meta is None:
             raise ValidationError(
                 f"module {wf.module_code} is not in snapshot id={snapshot_id} "
                 f"at release {rid}"
             )
+        # Freeze the taxonomy version this run is bound to. The user selected a
+        # module version; record the exact version + framework version so history
+        # is reproducible even after later releases change what the module
+        # provides, and so rule scoping uses this version, not a live one.
+        run_module_version = meta.module_version
+        run_framework_version = taxonomy.framework_version(lk.release_code(rid))
 
     # Capture the release's capability set at execution binding (reproducibility;
     # capabilities are otherwise derived on read).
@@ -589,6 +596,8 @@ def create_run(
         decimals=decimals if decimals is not None else -3,
         status=RunStatus.created,
         capabilities=caps.to_dict(),
+        module_version=run_module_version,
+        framework_version=run_framework_version,
         release_fingerprint=_release_fingerprint(db, snapshot),
     )
     db.add(run)
@@ -1104,18 +1113,29 @@ def _append_findings(db: Session, run_id: int, findings: list[Finding]) -> None:
     db.commit()
 
 
+def _run_module_scope(db: Session, run: Run) -> tuple[str | None, str | None]:
+    """The (module_code, framework_version) a run's rules are scoped to. The
+    module comes from the workflow; the framework version is frozen on the run.
+    Either may be None (legacy runs before the version-freeze) → no scoping."""
+    wf = db.get(WorkflowConfig, run.workflow_id)
+    module_code = wf.module_code if wf is not None else None
+    return module_code, run.framework_version
+
+
 def _register_rule_meta(db: Session, run: Run) -> dict | None:
     """Workbook facts for the run's register, resolved for its reporting date.
 
     ``{"descriptions": {...}, "inactive": {...}}`` from the release's ingested
-    validation rules, or ``None`` when no workbook is ingested. Never raises —
-    the register renders without it.
+    validation rules, scoped to the run's module version. ``None`` when no
+    workbook is ingested. Never raises — the register renders without it.
     """
     try:
         if not taxonomy_rules.has_ingested_rules(db, run.snapshot_id):
             return None
+        module_code, framework_version = _run_module_scope(db, run)
         view = taxonomy_rules.build_register_view(
-            db, run.snapshot_id, run.reference_date
+            db, run.snapshot_id, run.reference_date,
+            module_code=module_code, framework_version=framework_version,
         )
         return {"descriptions": view.descriptions, "inactive": view.inactive}
     except Exception:  # noqa: BLE001 — the register must render regardless
@@ -1131,6 +1151,23 @@ def build_run_register(db: Session, run: Run, findings: list) -> list:
     return validation_register.build_register(
         findings, run.formula_summary, rule_meta=_register_rule_meta(db, run)
     )
+
+
+def _rule_scope_statement(run: Run) -> str | None:
+    """Plain-language statement of the rule set applied, e.g.
+    "1,284 rules applicable to COREP_LCR_DA 3.3.0 at 31 Dec 2025"."""
+    scope = run.rule_scope
+    if not scope:
+        return None
+    count = scope.get("count", 0)
+    module = scope.get("module_code") or ""
+    version = scope.get("module_version") or ""
+    try:
+        when = date.fromisoformat(scope["reference_date"]).strftime("%d %b %Y")
+    except (KeyError, ValueError):
+        when = run.reference_date.strftime("%d %b %Y")
+    module_bit = f" to {module} {version}".rstrip() if module else ""
+    return f"{count:,} rules applicable{module_bit} at {when}"
 
 
 def _write_validation_report(
@@ -1152,6 +1189,7 @@ def _write_validation_report(
         identity=_report_identity(db, run, wf, package_filename),
         register=build_run_register(db, run, findings),
         formula=run.formula_summary,
+        scope_statement=_rule_scope_statement(run),
     )
     facts.upsert_run_file(
         db,
@@ -1631,13 +1669,24 @@ def run_formula_validation_task(run_id: int) -> None:
         # AND the per-rule EBA severity (blocking vs non-blocking).
         deactivated: set[str] | None = None
         severities: dict[str, str] = {}
+        rule_scope: dict | None = None
         try:
             if taxonomy_rules.has_ingested_rules(db, run.snapshot_id):
+                module_code, framework_version = _run_module_scope(db, run)
                 view = taxonomy_rules.build_register_view(
-                    db, run.snapshot_id, run.reference_date
+                    db, run.snapshot_id, run.reference_date,
+                    module_code=module_code, framework_version=framework_version,
                 )
                 deactivated = view.deactivated_codes
                 severities = view.severities
+                # Freeze the rule set applied, so the report can state it plainly.
+                rule_scope = {
+                    "count": view.applicable_count,
+                    "module_code": module_code,
+                    "module_version": run.module_version,
+                    "framework_version": framework_version,
+                    "reference_date": run.reference_date.isoformat(),
+                }
         except Exception:  # noqa: BLE001 — fall back to the default list
             logger.exception(
                 "run id=%s: workbook rule load failed", run.id,
@@ -1666,6 +1715,8 @@ def run_formula_validation_task(run_id: int) -> None:
         findings = [_apply_workbook_severity(f, severities) for f in result.findings]
 
         run.formula_summary = _build_formula_summary(result, severities)
+        if rule_scope is not None:
+            run.rule_scope = rule_scope
         _append_findings(db, run.id, findings)
         _write_validation_report(
             db, run, wf, outputs[-1].filename, settings=settings

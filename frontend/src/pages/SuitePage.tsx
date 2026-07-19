@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { listRegulators, listSnapshots, type Snapshot } from '../api/snapshots'
+import { listRegulators } from '../api/snapshots'
 import {
   attachFactFile,
   createRun,
   executeRun,
   getConfig,
   listEntities,
+  listModuleVersions,
   runHistory,
   type Entity,
+  type ModuleVersionOption,
   type Run,
   type WorkflowConfig,
 } from '../api/workflows'
@@ -35,7 +37,9 @@ export default function SuitePage() {
 
   const [config, setConfig] = useState<WorkflowConfig | null>(null)
   const [regName, setRegName] = useState('')
-  const [releases, setReleases] = useState<Snapshot[]>([])
+  // Taxonomy versions available for this suite's module (deduped across
+  // releases). Null while loading, so we can show a loading vs empty state.
+  const [versions, setVersions] = useState<ModuleVersionOption[] | null>(null)
   const [entities, setEntities] = useState<Entity[]>([])
   const [runs, setRuns] = useState<Run[]>([])
   const [creating, setCreating] = useState(false)
@@ -46,7 +50,8 @@ export default function SuitePage() {
   const [snapshotKey, setSnapshotKey] = useState('')
   const [adjustedKey, setAdjustedKey] = useState('')
   const [versionKey, setVersionKey] = useState('')
-  const [releaseId, setReleaseId] = useState<number | ''>('')
+  // Index into `versions` — nothing preselected; the user chooses deliberately.
+  const [versionIdx, setVersionIdx] = useState<number | ''>('')
   const [factFile, setFactFile] = useState<File | null>(null)
 
   const [busy, setBusy] = useState<string | null>(null)
@@ -62,12 +67,15 @@ export default function SuitePage() {
   useEffect(() => {
     getConfig(id).then(setConfig)
     listRegulators().then((rs) => setRegName(rs[0]?.name ?? '')).catch(() => {})
-    listSnapshots()
-      .then((s) => setReleases(s.filter((x) => x.status === 'ready')))
-      .catch(() => setReleases([]))
+    listModuleVersions(id)
+      .then((r) => setVersions(r.options))
+      .catch(() => setVersions([]))
     listEntities().then(setEntities).catch(() => setEntities([]))
     loadRuns()
   }, [id, loadRuns])
+
+  const selectedVersion =
+    versionIdx !== '' && versions ? (versions[versionIdx] ?? null) : null
 
   const byDate = useMemo(() => {
     const m = new Map<string, Run[]>()
@@ -107,18 +115,19 @@ export default function SuitePage() {
   const ready =
     reportingDate !== '' &&
     entityId !== '' &&
-    releaseId !== '' &&
+    selectedVersion !== null &&
     factFile !== null &&
     busy === null
 
   async function handleExecute() {
-    if (entityId === '' || releaseId === '' || !factFile) return
+    if (entityId === '' || selectedVersion === null || !factFile) return
     setError(null)
     try {
       setBusy('Creating submission…')
       const run = await createRun({
         workflow_id: id,
-        snapshot_id: releaseId,
+        // The chosen version resolves to the release providing it.
+        snapshot_id: selectedVersion.snapshot_id,
         reference_date: reportingDate,
         entity_id: entityId,
         snapshot_key: snapshotKey || undefined,
@@ -168,10 +177,13 @@ export default function SuitePage() {
         <div className="mb-10">
           <SectionLabel>New submission</SectionLabel>
           <Block className="p-6">
-            {releases.length === 0 ? (
+            {versions === null ? (
+              <p className="text-[14px] text-sub">Loading taxonomy versions…</p>
+            ) : versions.length === 0 ? (
               <p className="text-[14px] text-sub">
-                No taxonomy release is available yet. Add one under Taxonomies
-                before submitting.
+                No taxonomy version is available for this suite yet. Add a
+                release that contains this module under Taxonomies before
+                submitting.
               </p>
             ) : (
               <div className="space-y-5">
@@ -221,15 +233,30 @@ export default function SuitePage() {
 
                 <div className="grid gap-5 sm:grid-cols-2">
                   <label className="block">
-                    <FieldLabel>Taxonomy release</FieldLabel>
-                    <Select value={releaseId} onChange={(v) => setReleaseId(v === '' ? '' : Number(v))}>
+                    <FieldLabel>Taxonomy version</FieldLabel>
+                    <Select
+                      value={versionIdx}
+                      onChange={(v) => setVersionIdx(v === '' ? '' : Number(v))}
+                    >
                       <option value="">Select…</option>
-                      {releases.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.display_name}
+                      {versions.map((o, i) => (
+                        <option key={`${o.module_version}-${o.framework_version}`} value={i}>
+                          {o.module_version}
                         </option>
                       ))}
                     </Select>
+                    {/* Supporting detail — available, not shouted. */}
+                    {selectedVersion && (
+                      <p className="mt-1.5 text-[12px] leading-snug text-sub">
+                        Framework {selectedVersion.framework_version}
+                        {selectedVersion.valid_from &&
+                          ` · from ${formatDate(selectedVersion.valid_from)}`}
+                        {' · '}
+                        {selectedVersion.provided_by.length === 1
+                          ? `provided by ${selectedVersion.provided_by[0]}`
+                          : `provided by ${selectedVersion.provided_by.length} releases (${selectedVersion.provided_by.join(', ')})`}
+                      </p>
+                    )}
                   </label>
                   <div className="block">
                     <FieldLabel>Fact file</FieldLabel>

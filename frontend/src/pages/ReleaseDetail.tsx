@@ -8,6 +8,10 @@ import {
   type ReleaseDetail as ReleaseDetailT,
 } from '../api/snapshots'
 import {
+  getReleaseProvisions,
+  type ReleaseProvisionsSummary,
+} from '../api/workflows'
+import {
   Block,
   ErrorText,
   Loading,
@@ -49,6 +53,8 @@ export default function ReleaseDetail() {
   const id = Number(snapshotId)
   const navigate = useNavigate()
   const [detail, setDetail] = useState<ReleaseDetailT | null>(null)
+  const [provisions, setProvisions] =
+    useState<ReleaseProvisionsSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -62,6 +68,15 @@ export default function ReleaseDetail() {
   useEffect(() => {
     load()
   }, [load])
+
+  // The ingestion summary (what this release provides per enabled suite) only
+  // makes sense once the release is usable; the backend reads the same recorded
+  // modules the selector does — no client-side inference.
+  useEffect(() => {
+    if (detail?.ready) {
+      getReleaseProvisions(id).then(setProvisions).catch(() => setProvisions(null))
+    }
+  }, [detail?.ready, id])
 
   const converting =
     detail?.release.status === 'ingesting' ||
@@ -177,6 +192,41 @@ export default function ReleaseDetail() {
           </Block>
         ))}
       </div>
+
+      {/* What this release provides for each enabled suite, and what's new. */}
+      {provisions && provisions.provisions.length > 0 && (
+        <div className="mt-8">
+          <SectionLabel>What this release provides</SectionLabel>
+          <Block className="mt-2.5 overflow-hidden">
+            {provisions.provisions.map((p) => (
+              <div
+                key={p.module_code}
+                className="flex items-center justify-between gap-4 border-t border-divider px-6 py-3.5 first:border-t-0"
+              >
+                <span className="text-[14px] text-ink">{p.workflow_name}</span>
+                {p.module_version === null ? (
+                  <span className="text-[13px] text-muted">Not in this release</span>
+                ) : (
+                  <span className="flex items-center gap-2.5 text-[13px]">
+                    <span className="font-mono text-data">
+                      module version {p.module_version}
+                    </span>
+                    {p.is_new ? (
+                      <span className="rounded-[5px] bg-ink px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-white">
+                        New
+                      </span>
+                    ) : (
+                      <span className="text-muted">
+                        already available from {p.already_from}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+            ))}
+          </Block>
+        </div>
+      )}
 
       {/* Technical identifiers are evidence, not interface — behind a disclosure. */}
       <details className="mt-6 overflow-hidden rounded-[14px] border border-card bg-page">

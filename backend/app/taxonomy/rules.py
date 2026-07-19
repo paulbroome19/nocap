@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -396,6 +397,39 @@ def _covers(rule: ValidationRule, reporting_date: date) -> bool:
     return True
 
 
+# A module token in the workbook's Modules column: "{MODULE_CODE}_{version}",
+# e.g. "COREP_LCR_DA_4.2" or "COREP_..._4.2.1". The version is the framework/DPM
+# version, not the module version.
+_MODULE_TOKEN = re.compile(r"^(.+)_(\d+(?:\.\d+)+)$")
+
+
+def _token_framework(version: str) -> str:
+    """major.minor of a token's version, so a 4.2.1-tagged rule scopes to 4.2."""
+    parts = version.split(".")
+    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+        return f"{parts[0]}.{parts[1]}"
+    return version
+
+
+def _rule_covers_module(
+    modules: str | None, module_code: str, framework_version: str
+) -> bool:
+    """Whether a rule's Modules column applies to ``module_code`` at
+    ``framework_version``. A rule may list several comma-separated module tokens
+    (cross-module rules); any matching token scopes it in."""
+    if not modules:
+        return False
+    for token in modules.split(","):
+        m = _MODULE_TOKEN.match(token.strip())
+        if (
+            m
+            and m.group(1) == module_code
+            and _token_framework(m.group(2)) == framework_version
+        ):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class RegisterRuleView:
     """The workbook facts a run's formula register needs, resolved for a date.
@@ -416,12 +450,27 @@ class RegisterRuleView:
     inactive: dict[str, str]
     deactivated_codes: set[str] = field(default_factory=set)
     severities: dict[str, str] = field(default_factory=dict)
+    # Count of rules applicable to the run — active codes in scope covering the
+    # reporting date. Recorded on the run so the report can state it plainly.
+    applicable_count: int = 0
 
 
 def build_register_view(
-    db: Session, snapshot_id: int, reporting_date: date
+    db: Session,
+    snapshot_id: int,
+    reporting_date: date,
+    *,
+    module_code: str | None = None,
+    framework_version: str | None = None,
 ) -> RegisterRuleView:
-    """Resolve the ingested rules for a run's reporting date."""
+    """Resolve the ingested rules for a run's reporting date.
+
+    When ``module_code`` and ``framework_version`` are given, the rules are
+    **scoped** to that module at that framework version — a COREP LCR run is not
+    validated against FINREP (or other-version) rules. Without them, every rule
+    in the release is considered (legacy behaviour, used where no module scope
+    is available).
+    """
     rows = list(
         db.scalars(
             select(ValidationRule).where(
@@ -429,6 +478,12 @@ def build_register_view(
             )
         )
     )
+    if module_code and framework_version:
+        rows = [
+            r
+            for r in rows
+            if _rule_covers_module(r.modules, module_code, framework_version)
+        ]
     all_codes: set[str] = set()
     any_desc: dict[str, str] = {}
     # Effective covering row per code (prefer active, then the latest window).
@@ -462,4 +517,5 @@ def build_register_view(
         inactive=inactive,
         deactivated_codes=inactive_codes,
         severities=severities,
+        applicable_count=len(active_codes),
     )

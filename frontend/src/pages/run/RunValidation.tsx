@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { downloadRunFile, type RegisterRow } from '../../api/workflows'
 import VerdictBanner from '../../components/VerdictBanner'
 import { Block, EmptyState, PageHeader, SectionLabel } from '../../components/ui'
+import { formatDate } from '../../lib/format'
 import { runCrumbs, useRun } from './context'
 
 type Bucket = 'blocking' | 'failure' | 'warning' | 'passed' | 'other'
@@ -177,6 +178,16 @@ export default function RunValidation() {
       />
 
       <VerdictBanner verdict={detail.verdict} />
+
+      {detail.run.rule_scope && (
+        <p className="text-[13px] text-sub">
+          {detail.run.rule_scope.count.toLocaleString()} rules applicable
+          {detail.run.rule_scope.module_code &&
+            ` to ${detail.run.rule_scope.module_code} ${detail.run.rule_scope.module_version ?? ''}`.trimEnd()}
+          {' at '}
+          {formatDate(detail.run.rule_scope.reference_date)}
+        </p>
+      )}
 
       {rows.length === 0 ? (
         <EmptyState>No validation results yet for this run.</EmptyState>
