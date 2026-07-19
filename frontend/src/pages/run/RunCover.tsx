@@ -86,6 +86,8 @@ export default function RunCover() {
   const [selEntity, setSelEntity] = useState<number | ''>('')
   const [selRelease, setSelRelease] = useState<number | ''>('')
 
+  const inProgress =
+    run.status === 'running' || run.status === 'formula_validation_running'
   const needEntity = (changes ?? []).some((c) => c.kind === 'entity_deleted')
   const needRelease = (changes ?? []).some(
     (c) => c.kind === 'release_deleted' || c.kind === 'release_unavailable',
@@ -430,11 +432,16 @@ export default function RunCover() {
       </Card>
 
       {/* Delete this execution */}
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        {inProgress && (
+          <span className="text-xs text-slate-400">
+            Still running — wait for it to finish before deleting.
+          </span>
+        )}
         <button
           type="button"
-          disabled={busy !== null}
-          className="text-xs font-medium text-slate-400 hover:text-red-600 disabled:opacity-50"
+          disabled={busy !== null || inProgress}
+          className="text-xs font-medium text-slate-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-slate-400"
           onClick={() => void handleDelete()}
         >
           Delete this execution

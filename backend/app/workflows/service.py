@@ -795,9 +795,19 @@ def delete_run(
     on-disk directory), then the run itself. Other executions of the same
     instance are untouched. (When sign-off lands, a signed-off run can never be
     deleted — a future guard.)
+
+    A run that is still in progress cannot be deleted — deleting mid-execution
+    would race the work writing back to it. The caller is asked to wait.
     """
     settings = settings or get_settings()
-    get_run(db, run_id)  # 404 if unknown
+    run = get_run(db, run_id)  # 404 if unknown
+    if run.status in (
+        RunStatus.running, RunStatus.formula_validation_running
+    ):
+        raise ConflictError(
+            "This execution is still running — wait for it to finish before "
+            "deleting it."
+        )
     db.execute(delete(Fact).where(Fact.run_id == run_id))
     db.execute(delete(ValidationFinding).where(ValidationFinding.run_id == run_id))
     db.execute(delete(RunFile).where(RunFile.run_id == run_id))
@@ -1638,6 +1648,19 @@ def run_formula_validation_task(run_id: int) -> None:
             deactivated_rules=deactivated,
         )
         result = validator.validate_detailed(package_path, taxo)  # never raises
+
+        # The Arelle call is long (~minutes). The run may have been deleted (or
+        # otherwise finalised) while it ran; re-check before writing anything
+        # back so a delete mid-window can't orphan findings or resurrect the run.
+        db.expire_all()
+        run = db.get(Run, run_id)
+        if run is None or run.status is not RunStatus.formula_validation_running:
+            logger.info(
+                "run id=%s no longer awaiting formula results (deleted or "
+                "finalised); discarding", run_id, extra={"run_id": run_id},
+            )
+            return
+
         # Re-key formula finding severities to the authoritative EBA workbook
         # severity, so an error-severity rule that fails blocks submission.
         findings = [_apply_workbook_severity(f, severities) for f in result.findings]
