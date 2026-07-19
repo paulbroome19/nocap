@@ -15,6 +15,7 @@ import csv
 import io
 import json
 import re
+import xml.etree.ElementTree as ET
 import zipfile
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
@@ -339,6 +340,339 @@ def validate_package(
                 "and not verified against the published 4.2 COREP taxonomy",
                 file="reports/report.json")
     )
+    return findings
+
+
+# --- xBRL-XML instance checks (docs/xml-notes.md §9) -----------------------
+
+_XBRLI = "http://www.xbrl.org/2003/instance"
+_LINK = "http://www.xbrl.org/2003/linkbase"
+_XBRLDI = "http://xbrl.org/2006/xbrldi"
+_FIND = "http://www.eurofiling.info/xbrl/ext/filing-indicators"
+_XLINK = "http://www.w3.org/1999/xlink"
+# A non-xml processing instruction (the generating-software PI, rule 2.26).
+_SOFTWARE_PI_RE = re.compile(rb"<\?(?!xml[\s?])[\w-]+")
+
+
+def _xbrli(local: str) -> str:
+    return f"{{{_XBRLI}}}{local}"
+
+
+def _context_signature(ctx: ET.Element) -> tuple:
+    """Canonical identity of a context: entity, period, sorted scenario."""
+    entity = ctx.find(_xbrli("entity"))
+    ident = entity.find(_xbrli("identifier")) if entity is not None else None
+    subject = (
+        (ident.get("scheme"), (ident.text or "").strip())
+        if ident is not None
+        else (None, None)
+    )
+    period = ctx.find(_xbrli("period"))
+    period_repr: tuple = ()
+    if period is not None:
+        period_repr = tuple(
+            (child.tag, (child.text or "").strip()) for child in period
+        )
+    members: list[tuple[str, str]] = []
+    scenario = ctx.find(_xbrli("scenario"))
+    if scenario is not None:
+        for m in scenario.findall(f"{{{_XBRLDI}}}explicitMember"):
+            members.append((m.get("dimension", ""), (m.text or "").strip()))
+    return (subject, period_repr, tuple(sorted(members)))
+
+
+def _err(code: str, message: str, **loc) -> Finding:
+    return Finding(
+        severity=Severity.error, phase=_POST, code=code, message=message, **loc
+    )
+
+
+def _warn(code: str, message: str, **loc) -> Finding:
+    return Finding(
+        severity=Severity.warning, phase=_POST, code=code, message=message, **loc
+    )
+
+
+def validate_xml_instance(
+    *,
+    package_bytes: bytes,
+    package_filename: str,
+    filing_indicators: Sequence[IndicatorLike],
+) -> list[Finding]:
+    """Structural checks specific to a single-file xBRL-XML instance (rules in
+    docs/xml-notes.md §9). The CSV package check-set does not apply here."""
+    findings: list[Finding] = []
+
+    if not _FILENAME_RE.match(package_filename):
+        findings.append(
+            _err("FILENAME_CONVENTION",
+                 f"package filename {package_filename!r} does not match the EBA "
+                 "naming convention", file=package_filename)
+        )
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(package_bytes))
+    except zipfile.BadZipFile as exc:
+        return findings + [
+            _err("PACKAGE_UNREADABLE", f"package is not a readable zip: {exc}",
+                 file=package_filename)
+        ]
+
+    xbrls = [n for n in zf.namelist() if n.endswith(".xbrl")]
+    if len(xbrls) != 1:
+        return findings + [
+            _err("XML_INSTANCE_LAYOUT",
+                 f"expected exactly one .xbrl instance, found {len(xbrls)}",
+                 file=package_filename)
+        ]
+    raw = zf.read(xbrls[0])
+    instance = xbrls[0]
+
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        return findings + [
+            _err("XML_UNPARSEABLE", f"instance is not well-formed XML: {exc}",
+                 file=instance)
+        ]
+
+    if root.tag != _xbrli("xbrl"):
+        findings.append(
+            _err("XML_INSTANCE_LAYOUT",
+                 f"root element is {root.tag!r}, expected xbrli:xbrl",
+                 file=instance)
+        )
+
+    findings += _xml_schema_ref(root, instance)
+    findings += _xml_forbidden_constructs(root, raw, instance)
+    findings += _xml_subject_and_period(root, instance)
+    findings += _xml_dimensions_in_scenario(root, instance)
+    findings += _xml_units(root, instance)
+    findings += _xml_facts(root, instance)
+    findings += _xml_contexts(root, instance)
+    findings += _xml_short_ids(root, instance)
+    findings += _xml_software_info(raw, instance)
+    findings += _xml_filing_indicators(root, filing_indicators, instance)
+    return findings
+
+
+def _xml_schema_ref(root: ET.Element, instance: str) -> list[Finding]:
+    """One absolute .xsd schemaRef, no linkbaseRef (rules 2.2, 2.3)."""
+    refs = root.findall(f"{{{_LINK}}}schemaRef")
+    if len(refs) != 1:
+        return [_err("XML_SCHEMAREF",
+                     f"expected exactly one link:schemaRef, found {len(refs)}",
+                     file=instance)]
+    href = refs[0].get(f"{{{_XLINK}}}href", "")
+    if not href.startswith(("http://", "https://")) or not href.endswith(".xsd"):
+        return [_err("XML_SCHEMAREF",
+                     f"schemaRef href {href!r} must be an absolute .xsd URL",
+                     file=instance)]
+    return []
+
+
+def _xml_forbidden_constructs(
+    root: ET.Element, raw: bytes, instance: str
+) -> list[Finding]:
+    """No xml:base, link:linkbaseRef, or xbrli:segment (rules 2.1, 2.4, 2.14)."""
+    findings: list[Finding] = []
+    if b"xml:base" in raw:
+        findings.append(_err("XML_FORBIDDEN_CONSTRUCT",
+                             "xml:base is not allowed (rule 2.1)", file=instance))
+    if root.findall(f"{{{_LINK}}}linkbaseRef"):
+        findings.append(_err("XML_FORBIDDEN_CONSTRUCT",
+                             "link:linkbaseRef is not allowed (rule 2.4)",
+                             file=instance))
+    if any(True for _ in root.iter(_xbrli("segment"))):
+        findings.append(_err("XML_FORBIDDEN_CONSTRUCT",
+                             "xbrli:segment is not allowed; use scenario "
+                             "(rule 2.14)", file=instance))
+    return findings
+
+
+def _xml_subject_and_period(root: ET.Element, instance: str) -> list[Finding]:
+    """One entity identifier value (2.9); every context has a period (2.10)."""
+    findings: list[Finding] = []
+    contexts = root.findall(_xbrli("context"))
+    subjects = set()
+    for ctx in contexts:
+        entity = ctx.find(_xbrli("entity"))
+        ident = entity.find(_xbrli("identifier")) if entity is not None else None
+        if ident is not None:
+            subjects.add((ident.get("scheme"), (ident.text or "").strip()))
+        if ctx.find(_xbrli("period")) is None:
+            findings.append(_err("XML_PERIOD",
+                                 f"context {ctx.get('id')!r} has no period",
+                                 file=instance))
+    if len(subjects) > 1:
+        findings.append(_err("XML_SINGLE_SUBJECT",
+                             f"instance reports {len(subjects)} distinct entity "
+                             "identifiers; a report has a single subject",
+                             file=instance))
+    return findings
+
+
+def _xml_dimensions_in_scenario(
+    root: ET.Element, instance: str
+) -> list[Finding]:
+    """explicitMember appears only inside xbrli:scenario (rule 2.15)."""
+    findings: list[Finding] = []
+    for ctx in root.findall(_xbrli("context")):
+        scenario = ctx.find(_xbrli("scenario"))
+        allowed = set(scenario.iter()) if scenario is not None else set()
+        for m in ctx.iter(f"{{{_XBRLDI}}}explicitMember"):
+            if m not in allowed:
+                findings.append(_err("XML_DIMENSION_SCENARIO",
+                                     f"dimension member in context "
+                                     f"{ctx.get('id')!r} is outside xbrli:scenario",
+                                     file=instance))
+    return findings
+
+
+def _xml_units(root: ET.Element, instance: str) -> list[Finding]:
+    """No duplicate or unused units (rules 2.21, 2.22)."""
+    findings: list[Finding] = []
+    unit_ids: list[str] = [
+        u.get("id", "") for u in root.findall(_xbrli("unit"))
+    ]
+    seen: set[str] = set()
+    for uid in unit_ids:
+        if uid in seen:
+            findings.append(_err("XML_UNIT_HYGIENE",
+                                 f"duplicate unit id {uid!r}", file=instance))
+        seen.add(uid)
+    referenced = {
+        el.get("unitRef")
+        for el in root.iter()
+        if el.get("unitRef") is not None
+    }
+    # An unused unit is surplus, not a malformation (real EBA instances carry
+    # them), so it is a warning; a duplicate id above is an error.
+    for uid in sorted(seen - referenced):
+        findings.append(_warn("XML_UNIT_HYGIENE",
+                              f"unit {uid!r} is declared but never referenced",
+                              file=instance))
+    return findings
+
+
+def _is_fact(el: ET.Element) -> bool:
+    """A reported fact: carries contextRef and is not a filing indicator."""
+    return (
+        el.get("contextRef") is not None
+        and not el.tag.startswith(f"{{{_FIND}}}")
+    )
+
+
+def _xml_facts(root: ET.Element, instance: str) -> list[Finding]:
+    """Decimals not precision (2.17, 2.18) and no duplicate facts (2.16)."""
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for el in root.iter():
+        if el.get("precision") is not None:
+            findings.append(_err("XML_DECIMALS",
+                                 f"{el.tag} carries @precision; only @decimals is "
+                                 "allowed (rule 2.17)", file=instance))
+        if not _is_fact(el):
+            continue
+        # Numeric facts (those with a unit) must carry @decimals.
+        if el.get("unitRef") is not None and el.get("decimals") is None:
+            findings.append(_err("XML_DECIMALS",
+                                 f"numeric fact {el.tag} has no @decimals "
+                                 "(rule 2.18)", file=instance))
+        key = (el.tag, el.get("contextRef", ""))
+        if key in seen:
+            findings.append(_err("XML_DUPLICATE_FACT",
+                                 f"duplicate fact {el.tag} in context "
+                                 f"{el.get('contextRef')!r} (rule 2.16)",
+                                 file=instance))
+        seen.add(key)
+    return findings
+
+
+def _xml_contexts(root: ET.Element, instance: str) -> list[Finding]:
+    """No unused or duplicated contexts (rule 2.7).
+
+    The filing-indicator context legitimately shares its entity + period with a
+    dimensionless data context (as real EBA instances do — the sample carries
+    both ``cfi`` and a no-scenario data context), so it is excluded from the
+    duplicate comparison. Duplication among data contexts is still caught.
+    """
+    findings: list[Finding] = []
+    contexts = root.findall(_xbrli("context"))
+    referenced = {
+        el.get("contextRef")
+        for el in root.iter()
+        if el.get("contextRef") is not None
+    }
+    fi_contexts = {
+        fi.get("contextRef")
+        for fi in root.iter(f"{{{_FIND}}}filingIndicator")
+    }
+    seen: dict[tuple, str] = {}
+    for ctx in contexts:
+        cid = ctx.get("id", "")
+        if cid not in referenced:
+            findings.append(_warn("XML_CONTEXT_HYGIENE",
+                                  f"context {cid!r} is declared but never "
+                                  "referenced", file=instance))
+        if cid in fi_contexts:
+            continue
+        sig = _context_signature(ctx)
+        if sig in seen:
+            findings.append(_err("XML_CONTEXT_HYGIENE",
+                                 f"context {cid!r} duplicates {seen[sig]!r} "
+                                 "(same entity, period, and scenario)",
+                                 file=instance))
+        else:
+            seen[sig] = cid
+    return findings
+
+
+def _xml_short_ids(root: ET.Element, instance: str) -> list[Finding]:
+    """Context/unit @id are short and non-semantic (rule 2.6). Heuristic:
+    non-empty, whitespace-free, and reasonably short."""
+    findings: list[Finding] = []
+    for el in (*root.findall(_xbrli("context")), *root.findall(_xbrli("unit"))):
+        cid = el.get("id", "")
+        if not cid or any(c.isspace() for c in cid) or len(cid) > 32:
+            findings.append(
+                Finding(severity=Severity.warning, phase=_POST,
+                        code="XML_SHORT_ID",
+                        message=f"id {cid!r} is not a short non-semantic "
+                        "identifier (rule 2.6)", file=instance)
+            )
+    return findings
+
+
+def _xml_software_info(raw: bytes, instance: str) -> list[Finding]:
+    """A generating-software processing instruction is present (rule 2.26).
+
+    A recommendation, not a hard requirement — real EBA instances omit it — so a
+    missing PI is a warning. Our own builder always emits one.
+    """
+    if _SOFTWARE_PI_RE.search(raw) is None:
+        return [_warn("XML_SOFTWARE_INFO",
+                      "no generating-software processing instruction "
+                      "(rule 2.26)", file=instance)]
+    return []
+
+
+def _xml_filing_indicators(
+    root: ET.Element, filing_indicators: Sequence[IndicatorLike], instance: str
+) -> list[Finding]:
+    """Every template reported has a positive find:filingIndicator (rule 1.6)."""
+    findings: list[Finding] = []
+    positive: set[str] = set()
+    for fi in root.iter(f"{{{_FIND}}}filingIndicator"):
+        filed = fi.get(f"{{{_FIND}}}filed", "true")
+        if filed == "true":
+            positive.add((fi.text or "").strip())
+    for ind in filing_indicators:
+        if ind.reported and ind.template_code not in positive:
+            findings.append(_err("MISSING_FILING_INDICATOR",
+                                 f"template {ind.template_code} is reported but "
+                                 "has no positive filing indicator in the instance",
+                                 file=instance, template_code=ind.template_code))
     return findings
 
 

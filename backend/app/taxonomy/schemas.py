@@ -118,3 +118,34 @@ class DatapointResolution(BaseModel):
     datatype_name: str
     period_type: str | None
     cell_code: str | None
+    # xBRL-XML signature sources (DPM VariableVersion): the metric Property and
+    # the datapoint's dimensional Context. Null on older snapshots that predate
+    # the dimensional projection.
+    property_id: int | None = None
+    context_id: int | None = None
+
+
+class XmlQName(BaseModel):
+    """A resolved xBRL QName: prefix, namespace URI, and local name."""
+
+    prefix: str  # e.g. "eba_met", "eba_dim_3.4", "eba_PL"
+    namespace: str  # the full URI the prefix binds to
+    local: str  # e.g. "mi1001", "PRP", "x11"
+
+
+class XmlMember(BaseModel):
+    """One explicit dimension → member pair in a datapoint's scenario."""
+
+    dimension: XmlQName
+    member: XmlQName
+
+
+class XmlSignature(BaseModel):
+    """A datapoint's full xBRL-XML signature: its metric + scenario members.
+
+    Assembled from the DPM per docs/xml-notes.md. ``members`` is empty for a
+    metric with no dimensional context.
+    """
+
+    metric: XmlQName
+    members: list[XmlMember]

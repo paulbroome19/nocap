@@ -7,10 +7,23 @@ See docs/package-notes.md for the package format these map onto.
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
 from datetime import date
 
 from pydantic import BaseModel
+
+
+class OutputFormat(enum.StrEnum):
+    """The instance serialisation a package is generated in.
+
+    Both formats are produced from the same resolved facts + metadata; the
+    choice is per-(regulator, workflow) configuration, not a code branch. See
+    docs/xml-notes.md for the xBRL-XML path.
+    """
+
+    xbrl_csv = "xbrl_csv"
+    xbrl_xml = "xbrl_xml"
 
 
 class FactInput(BaseModel):

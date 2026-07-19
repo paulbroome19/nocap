@@ -207,6 +207,99 @@ STRUCTURAL_CHECKS: tuple[StructuralCheck, ...] = (
         "no taxonomy package — so formula rules were not evaluated.",
         "Formula",
     ),
+    # --- xBRL-XML instance checks (docs/xml-notes.md §9) --------------------
+    StructuralCheck(
+        "XML_INSTANCE_LAYOUT", "NC-S20",
+        "Package holds a single xBRL-XML instance",
+        "An xBRL-XML package must contain exactly one .xbrl instance document at "
+        "the zip root; anything else is not a submittable instance package.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_UNPARSEABLE", "NC-S21",
+        "Instance is well-formed XML",
+        "The generated .xbrl instance must be well-formed XML; a document that "
+        "does not parse cannot be validated or submitted.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_SCHEMAREF", "FR 2.2/2.3",
+        "Exactly one absolute .xsd schemaRef",
+        "The instance must carry exactly one link:schemaRef pointing at an "
+        "absolute .xsd taxonomy entry point, so the receiver binds the right "
+        "taxonomy.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_FORBIDDEN_CONSTRUCT", "FR 2.1/2.4/2.14",
+        "No xml:base, linkbaseRef, or segment",
+        "The filing rules forbid xml:base, link:linkbaseRef, and xbrli:segment "
+        "in a filed instance; dimensional context belongs in xbrli:scenario.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_CONTEXT_HYGIENE", "FR 2.7",
+        "No unused or duplicated contexts",
+        "Every xbrli:context must be referenced by a fact or filing indicator, "
+        "and no two contexts may share the same entity, period, and scenario.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_SINGLE_SUBJECT", "FR 2.9",
+        "Instance reports a single subject",
+        "All contexts must name the same entity identifier; a report covers one "
+        "reporting subject, so multiple identifiers indicate a malformed instance.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_PERIOD", "FR 2.10/2.13",
+        "Every context has a valid period",
+        "Each xbrli:context must carry a period; a context without one leaves its "
+        "facts without a reporting reference date.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_DIMENSION_SCENARIO", "FR 2.15",
+        "Dimensions appear only in scenario",
+        "Explicit dimension members must sit inside xbrli:scenario, never in a "
+        "segment, so dimensional qualification is read where the rules require it.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_DUPLICATE_FACT", "FR 2.16",
+        "No duplicate facts",
+        "The same concept reported against the same context is a duplicate fact; "
+        "each datapoint must appear once in the instance.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_DECIMALS", "FR 2.17/2.18",
+        "Numeric facts use @decimals, not @precision",
+        "Numeric facts must declare accuracy with @decimals and must not use "
+        "@precision, which the EBA filing rules prohibit.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_UNIT_HYGIENE", "FR 2.21/2.22",
+        "No unused or duplicated units",
+        "Every xbrli:unit must be referenced by a fact and each unit id must be "
+        "unique; unused or duplicated units are non-conformant.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_SHORT_ID", "FR 2.6",
+        "Context and unit ids are short and non-semantic",
+        "Context and unit identifiers should be short, whitespace-free, "
+        "non-semantic tokens rather than long encoded strings.",
+        "XML instance",
+    ),
+    StructuralCheck(
+        "XML_SOFTWARE_INFO", "FR 2.26",
+        "Generating-software processing instruction present",
+        "The instance must carry a processing instruction identifying the "
+        "software that generated it, per the filing rules.",
+        "XML instance",
+    ),
 )
 
 CHECK_BY_CODE: dict[str, StructuralCheck] = {c.code: c for c in STRUCTURAL_CHECKS}

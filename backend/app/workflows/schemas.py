@@ -7,6 +7,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.facts.schemas import RunFileOut
+from app.generation.schemas import OutputFormat
 from app.validation.schemas import FindingOut
 from app.workflows.models import RunStatus
 
@@ -92,6 +93,33 @@ class EntityWorkflowConfigWrite(BaseModel):
     decimals: int | None = None
 
 
+class RegulatorFormatOut(BaseModel):
+    """A regulator's default output format."""
+
+    regulator_id: int
+    output_format: OutputFormat
+
+
+class WorkflowFormatOut(BaseModel):
+    """The output format for a (regulator, workflow) pair.
+
+    ``output_format`` is always the effective format (override, else the
+    regulator default, else the built-in). ``overridden`` says whether a
+    per-workflow override is set; ``regulator_default`` is what applies without
+    one.
+    """
+
+    regulator_id: int
+    workflow_id: int
+    output_format: OutputFormat
+    overridden: bool
+    regulator_default: OutputFormat
+
+
+class OutputFormatWrite(BaseModel):
+    output_format: OutputFormat
+
+
 class RunCreate(BaseModel):
     workflow_id: int
     snapshot_id: int
@@ -123,6 +151,8 @@ class RunOut(BaseModel):
     version_key: str | None
     base_currency: str
     decimals: int
+    # The format the package was generated in; null until the run generates.
+    output_format: OutputFormat | None
     status: RunStatus
     error: str | None
     failure_details: list | None
