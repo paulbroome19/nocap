@@ -70,7 +70,7 @@ export default function ReleaseWizard() {
           if (f >= 1) setPhase('creating')
         },
       )
-      // Verified + accepted — the release now converts in the background.
+      // Fully created: verified, converted, and rules ingested — it's ready.
       navigate(`/releases/${release.id}`)
     } catch (e) {
       // A verification failure: nothing was created; keep the files so the
@@ -187,7 +187,10 @@ export default function ReleaseWizard() {
             </span>
           )}
           {phase === 'creating' && (
-            <span className="text-sm text-slate-500">Verifying files…</span>
+            <span className="text-sm text-slate-500">
+              Converting the DPM database and ingesting rules… this can take a
+              minute.
+            </span>
           )}
         </div>
         {phase === 'idle' && !error && (

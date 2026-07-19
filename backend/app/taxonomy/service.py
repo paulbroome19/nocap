@@ -29,7 +29,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
-from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.core.errors import (
+    AppError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from app.taxonomy.models import (
     ArtifactStatus,
     DpmSourceForm,
@@ -399,6 +404,31 @@ def register_snapshot(
     return snapshot
 
 
+def _convert_dpm(
+    db: Session,
+    snapshot: TaxonomySnapshot,
+    *,
+    settings: Settings,
+    converter=convert_accdb_to_sqlite,
+) -> None:
+    """Convert + validate a registered snapshot's DPM to the query SQLite.
+
+    Raises on any failure (missing source, bad conversion, not-a-DPM). Callers
+    decide whether to record the failure (re-ingest) or roll the whole release
+    back (transactional creation).
+    """
+    source = _source_path(settings, snapshot.id, snapshot.dpm_source_form)
+    target = _sqlite_path(settings, snapshot.id)
+    if not source.exists():
+        raise ValidationError("uploaded source file is missing")
+    if snapshot.dpm_source_form is DpmSourceForm.sqlite:
+        # Already a query database — no mdbtools conversion; adopt it as-is.
+        shutil.copyfile(source, target)
+    else:
+        converter(source, target, settings=settings)
+    validate_dpm_sqlite(target)
+
+
 def ingest_snapshot(
     db: Session,
     snapshot: TaxonomySnapshot,
@@ -408,20 +438,13 @@ def ingest_snapshot(
 ) -> None:
     """Convert + validate a registered snapshot, advancing status to ready/failed.
 
-    ``converter`` is injectable so ingestion can be tested without mdbtools.
+    Records failure on the snapshot rather than raising — used by the re-ingest
+    recovery path. ``converter`` is injectable so ingestion can be tested without
+    mdbtools. (Release *creation* converts transactionally via ``_convert_dpm``.)
     """
     settings = settings or get_settings()
-    source = _source_path(settings, snapshot.id, snapshot.dpm_source_form)
-    target = _sqlite_path(settings, snapshot.id)
     try:
-        if not source.exists():
-            raise ValidationError("uploaded source file is missing")
-        if snapshot.dpm_source_form is DpmSourceForm.sqlite:
-            # Already a query database — no mdbtools conversion; adopt it as-is.
-            shutil.copyfile(source, target)
-        else:
-            converter(source, target, settings=settings)
-        validate_dpm_sqlite(target)
+        _convert_dpm(db, snapshot, settings=settings, converter=converter)
     except Exception as exc:  # noqa: BLE001 — record any failure on the snapshot
         snapshot.status = SnapshotStatus.failed
         snapshot.error = str(exc)[:2000]
@@ -547,15 +570,19 @@ def create_release(
     rules_filename: str,
     settings: Settings | None = None,
     dpm_verifier=looks_like_access,
+    converter=convert_accdb_to_sqlite,
 ) -> TaxonomySnapshot:
     """Create a release from its three mandatory artifacts — all or nothing.
 
-    Every file is verified as being what it claims *before anything is
-    persisted*; a single failure means no release is created. Only once all
-    three verify are the files stored and the release row written (status
-    ``ingesting``); the caller schedules ``finalize_release_task`` to run the
-    slow DPM conversion + rule ingestion in the background. There is never a
-    partial release.
+    Every stage runs *before the release exists*: the three files are verified,
+    stored, the DPM is converted to the query database, and the validation rules
+    are ingested. Only if all of that succeeds is the release committed ``ready``
+    and returned — so a listed release is always usable. Any failure removes the
+    row and every stored file and raises a plain-language reason; there is never
+    a partial, ``ingesting``, or ``failed`` release left behind.
+
+    The DPM conversion + rule parse are the slow steps (~seconds); the caller
+    runs this synchronously and shows progress at the upload surface.
     """
     settings = settings or get_settings()
     # Local imports keep the stage's public surface clean; both are same-stage.
@@ -571,7 +598,8 @@ def create_release(
     _artifacts.verify_taxonomy_package(taxonomy_bytes, taxonomy_filename)
     _rules.verify_workbook_file(rules_bytes, rules_filename)
 
-    # All verified — persist the DPM (dedups by checksum) then the other two.
+    # All verified — persist the DPM (dedups by checksum) then do the full work
+    # transactionally: any failure purges the release entirely (no residue).
     snapshot = register_snapshot(
         db,
         file_bytes=dpm_bytes,
@@ -590,96 +618,82 @@ def create_release(
             db, snapshot, filename=rules_filename, data=rules_bytes,
             settings=settings,
         )
-    except Exception:
-        # Roll the just-created release back so nothing partial survives.
-        db.delete(snapshot)
+        # Slow work, synchronously — the release exists only on full success.
+        _convert_dpm(db, snapshot, settings=settings, converter=converter)
+        _rules.ingest_validation_rules(db, snapshot, settings=settings)
+        rules_art = db.scalar(
+            select(ReleaseArtifact).where(
+                ReleaseArtifact.snapshot_id == snapshot.id,
+                ReleaseArtifact.slot == ReleaseSlot.validation_rules,
+            )
+        )
+        if rules_art is not None and rules_art.status is ArtifactStatus.failed:
+            raise ValidationError(
+                "the validation-rules workbook could not be ingested: "
+                f"{rules_art.error}"
+            )
+        snapshot.status = SnapshotStatus.ready
+        snapshot.error = None
         db.commit()
-        remove_snapshot_dir(settings, snapshot.id)
-        raise
-    logger.info("created release id=%s (verifying)", snapshot.id)
+        db.refresh(snapshot)
+    except Exception as exc:
+        _purge_release(db, snapshot, settings=settings)
+        if isinstance(exc, AppError):
+            raise  # already a plain-language reason
+        raise ValidationError(f"the release could not be created: {exc}") from exc
+    logger.info("created release id=%s (ready)", snapshot.id)
     return snapshot
 
 
-def finalize_release(
-    db: Session,
-    snapshot: TaxonomySnapshot,
-    *,
-    settings: Settings | None = None,
-    converter=convert_accdb_to_sqlite,
+def _purge_release(
+    db: Session, snapshot: TaxonomySnapshot, *, settings: Settings
 ) -> None:
-    """Finish a created release: convert the DPM, ingest the rules → ready.
-
-    Any failure leaves the release ``failed`` (never a half-ready release). The
-    header of the rules workbook was already verified synchronously; this only
-    does the slow work (Access→SQLite conversion + parsing ~13k rule rows).
-    """
-    settings = settings or get_settings()
-    ingest_snapshot(db, snapshot, settings=settings, converter=converter)
-    if snapshot.status is not SnapshotStatus.ready:
-        return  # DPM conversion failed; the release is already marked failed
-
-    from app.taxonomy import rules as _rules
-
-    _rules.ingest_validation_rules(db, snapshot, settings=settings)
-    art = db.scalar(
-        select(ReleaseArtifact).where(
-            ReleaseArtifact.snapshot_id == snapshot.id,
-            ReleaseArtifact.slot == ReleaseSlot.validation_rules,
-        )
+    """Remove a release completely: child rows, the row itself, on-disk files."""
+    snapshot_id = snapshot.id
+    db.execute(
+        delete(ValidationRule).where(ValidationRule.snapshot_id == snapshot_id)
     )
-    if art is not None and art.status is ArtifactStatus.failed:
-        snapshot.status = SnapshotStatus.failed
-        snapshot.error = f"validation rules could not be ingested: {art.error}"
-        db.commit()
-        logger.warning("release id=%s failed on rule ingestion", snapshot.id)
-
-
-def finalize_release_task(snapshot_id: int) -> None:
-    """Background entrypoint for ``finalize_release`` by id."""
-    settings = get_settings()
-    with SessionLocal() as db:
-        snapshot = db.get(TaxonomySnapshot, snapshot_id)
-        if snapshot is None:
-            logger.warning("finalize task: release id=%s not found", snapshot_id)
-            return
-        finalize_release(db, snapshot, settings=settings)
+    db.execute(
+        delete(ReleaseArtifact).where(ReleaseArtifact.snapshot_id == snapshot_id)
+    )
+    db.delete(snapshot)
+    db.commit()
+    remove_snapshot_dir(settings, snapshot_id)
 
 
 def delete_release(
     db: Session,
     snapshot: TaxonomySnapshot,
     *,
-    run_count: int,
     settings: Settings | None = None,
 ) -> None:
-    """Delete a release and its artifacts, unless runs were produced from it.
+    """Delete a release and everything derived from it.
 
-    ``run_count`` is supplied by the caller (the workflows stage owns runs); a
-    release referenced by any run is kept for reproducibility and cannot be
-    deleted.
+    Permitted **regardless of any runs** produced from it: historical runs are
+    frozen and keep their own copies, so deleting the release never alters them.
+    Removes the database records, the converted database, the stored originals,
+    the taxonomy package, the ingested validation rules, and every derived
+    artifact on disk — after which the same files upload again cleanly.
     """
     settings = settings or get_settings()
-    if run_count > 0:
-        raise ConflictError(
-            f"This release cannot be deleted — {run_count} "
-            f"run{'s' if run_count != 1 else ''} were produced from it. "
-            "Releases used by runs are kept so those runs stay reproducible."
-        )
-    db.execute(
-        delete(ValidationRule).where(ValidationRule.snapshot_id == snapshot.id)
-    )
-    db.execute(
-        delete(ReleaseArtifact).where(ReleaseArtifact.snapshot_id == snapshot.id)
-    )
-    db.delete(snapshot)
-    db.commit()
-    remove_snapshot_dir(settings, snapshot.id)
-    logger.info("deleted release id=%s", snapshot.id)
+    snapshot_id = snapshot.id
+    _purge_release(db, snapshot, settings=settings)
+    logger.info("deleted release id=%s", snapshot_id)
+
+
+# A listed release is a usable one. Transient/broken states (ingesting during a
+# re-ingest, or a failed re-ingest) are excluded so "if it is listed, it can be
+# used" holds; they remain reachable by id for recovery or deletion.
+_LISTABLE_STATUSES = (SnapshotStatus.ready, SnapshotStatus.artifacts_missing)
 
 
 def list_snapshots(db: Session) -> list[TaxonomySnapshot]:
     return list(
-        db.scalars(select(TaxonomySnapshot).order_by(TaxonomySnapshot.id.desc()))
+        db.scalars(
+            select(TaxonomySnapshot)
+            .where(TaxonomySnapshot.status.in_(_LISTABLE_STATUSES))
+            .order_by(TaxonomySnapshot.id.desc())
+        )
     )
 
 
@@ -697,11 +711,14 @@ def get_regulator(db: Session, regulator_id: int) -> Regulator:
 def list_snapshots_for_regulator(
     db: Session, regulator_id: int
 ) -> list[TaxonomySnapshot]:
-    """Releases published by one regulator, newest first."""
+    """Usable releases published by one regulator, newest first."""
     return list(
         db.scalars(
             select(TaxonomySnapshot)
-            .where(TaxonomySnapshot.regulator_id == regulator_id)
+            .where(
+                TaxonomySnapshot.regulator_id == regulator_id,
+                TaxonomySnapshot.status.in_(_LISTABLE_STATUSES),
+            )
             .order_by(TaxonomySnapshot.id.desc())
         )
     )

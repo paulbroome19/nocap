@@ -146,12 +146,11 @@ def test_ingest_missing_file_fails_slot(
     db_session: Session, ready_release: TaxonomySnapshot
 ) -> None:
     settings = get_settings()
-    rules.store_workbook(
+    art = rules.store_workbook(
         db_session, ready_release, filename="rules.xlsx", data=fx.build_bytes()
     )
-    # Remove the stored original so ingestion fails.
-    (settings.data_dir / "snapshots" / str(ready_release.id) / "rules"
-     / "rules.xlsx").unlink()
+    # Remove the stored original (at its system storage key) so ingestion fails.
+    (settings.data_dir / art.storage_key).unlink()
     rules.ingest_validation_rules(db_session, ready_release)
 
     from app.taxonomy.models import ReleaseArtifact

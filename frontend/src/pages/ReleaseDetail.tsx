@@ -81,8 +81,13 @@ export default function ReleaseDetail() {
 
   async function handleDelete() {
     if (!detail) return
-    if (!window.confirm(`Delete ${detail.release.display_name}? This cannot be undone.`))
-      return
+    const message =
+      `Delete ${detail.release.display_name}?\n\n` +
+      'This removes the DPM database, the taxonomy package, the filing-rules ' +
+      'workbook, the ingested validation rules, and every stored file for this ' +
+      'release. Runs already produced from it are unaffected. This cannot be ' +
+      'undone.'
+    if (!window.confirm(message)) return
     setActionError(null)
     setBusy(true)
     try {

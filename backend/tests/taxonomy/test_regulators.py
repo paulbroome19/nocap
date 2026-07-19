@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.taxonomy import service
-from app.taxonomy.models import Regulator
+from app.taxonomy.models import Regulator, SnapshotStatus
 from app.taxonomy.seed import eba, seed_regulators
 
 
@@ -42,14 +42,17 @@ def test_releases_are_scoped_to_their_regulator(
     other = Regulator(code="PRA", name="Prudential Regulation Authority")
     db_session.add(other)
     db_session.commit()
-    service.register_snapshot(
+    # Mark ready so they are listable (the list shows usable releases only).
+    s1 = service.register_snapshot(
         db_session, file_bytes=b"eba", filename="e.accdb", version_label="4.2",
         regulator_id=eba_id,
     )
-    service.register_snapshot(
+    s2 = service.register_snapshot(
         db_session, file_bytes=b"pra", filename="p.accdb", version_label="1.0",
         regulator_id=other.id,
     )
+    s1.status = s2.status = SnapshotStatus.ready
+    db_session.commit()
 
     eba_releases = client.get(f"/api/taxonomy/regulators/{eba_id}/releases").json()
     assert {r["version_label"] for r in eba_releases} == {"4.2"}

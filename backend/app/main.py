@@ -109,12 +109,6 @@ def create_app() -> FastAPI:
     app.dependency_overrides[get_template_normalizer] = lambda: (
         lambda code: normalize_template_code(code, form="db")
     )
-    # Wire the release-deletion guard to the workflows run count (the taxonomy
-    # stage must not import workflows; the count is supplied here).
-    from app.taxonomy.router import get_run_counter
-    from app.workflows.service import count_runs_for_snapshot
-
-    app.dependency_overrides[get_run_counter] = lambda: count_runs_for_snapshot
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:

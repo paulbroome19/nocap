@@ -202,9 +202,11 @@ class Run(Base):
     workflow_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("workflow_config.id"), index=True
     )
-    snapshot_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("taxonomy_snapshot.id"), index=True
-    )
+    # Frozen provenance: which release this run used. Kept as a plain id (no FK)
+    # so the release can be deleted while the run's own frozen record — package,
+    # inputs, validation, entity values — stays intact (history is never altered
+    # by deleting a release). See PRODUCT.md (release deletion).
+    snapshot_id: Mapped[int] = mapped_column(Integer, index=True)
     # The explicit DPM release id within the snapshot this run is bound to.
     release_id: Mapped[int] = mapped_column(Integer)
 
