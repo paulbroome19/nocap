@@ -198,6 +198,13 @@ export default function RunCover() {
             label="Taxonomy release"
             value={releaseMissing ? '—' : (release?.version_label ?? '')}
           />
+          {/* The taxonomy version the run was executed against — frozen on the
+              run, so it reads correctly even if the release is later deleted. */}
+          <IdField
+            label="Taxonomy version"
+            value={run.module_version ?? '—'}
+            mono
+          />
           <IdField label="Snapshot" value={run.snapshot_key ?? ''} mono />
           <IdField label="Adjusted" value={run.adjusted_key ?? ''} mono />
           <IdField label="Version" value={run.version_key ?? ''} mono />

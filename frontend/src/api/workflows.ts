@@ -176,7 +176,20 @@ export interface Run {
   status: RunStatus
   error: string | null
   failure_details: Array<Record<string, unknown>> | null
+  // The taxonomy version this run was executed against, frozen at creation.
+  module_version: string | null
+  framework_version: string | null
+  // The validation-rule set applied, frozen when validation ran.
+  rule_scope: RuleScope | null
   created_at: string
+}
+
+export interface RuleScope {
+  count: number
+  module_code: string | null
+  module_version: string | null
+  framework_version: string | null
+  reference_date: string
 }
 
 export interface RunFile {
@@ -305,6 +318,53 @@ export const listWorkflowTemplates = (workflowId: number, snapshotId: number) =>
 
 export const runHistory = (workflowId: number) =>
   getJSON<Run[]>(`/api/workflows/configs/${workflowId}/runs`)
+
+/** One selectable taxonomy version for a suite's module — a distinct
+ *  (module_version, framework_version) across all ready releases. The dropdown
+ *  shows module_version; the rest is supporting detail. A run binds to
+ *  snapshot_id (the newest release providing this version). */
+export interface ModuleVersionOption {
+  module_code: string
+  module_name: string | null
+  module_version: string
+  framework_version: string
+  snapshot_id: number
+  valid_from: string | null
+  valid_to: string | null
+  provided_by: string[]
+}
+
+export interface ModuleVersionOptions {
+  workflow_id: number
+  module_code: string
+  options: ModuleVersionOption[]
+}
+
+export const listModuleVersions = (workflowId: number) =>
+  getJSON<ModuleVersionOptions>(
+    `/api/workflows/configs/${workflowId}/module-versions`,
+  )
+
+/** The ingestion summary: per enabled suite, what a release provides. */
+export interface ReleaseProvision {
+  module_code: string
+  module_name: string | null
+  workflow_name: string
+  module_version: string | null
+  framework_version: string | null
+  is_new: boolean
+  already_from: string | null
+}
+
+export interface ReleaseProvisionsSummary {
+  snapshot_id: number
+  provisions: ReleaseProvision[]
+}
+
+export const getReleaseProvisions = (snapshotId: number) =>
+  getJSON<ReleaseProvisionsSummary>(
+    `/api/workflows/releases/${snapshotId}/provisions`,
+  )
 
 export interface CreateRunBody {
   workflow_id: number
