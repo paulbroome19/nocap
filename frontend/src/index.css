@@ -1,1 +1,53 @@
+/* Self-hosted fonts — bundled at build, no runtime network (offline-safe).
+   Zilla Slab is the wordmark only; IBM Plex Mono is codes/IDs/filenames/figures.
+   Helvetica Neue (content) is a system font, resolved via the stack. */
+@import '@fontsource/zilla-slab/700.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
 @import 'tailwindcss';
+
+/* Carter design tokens — the single source; every screen consumes these. */
+@theme {
+  /* §1 · colour tokens */
+  --color-ink: #111111; /* sidebar ground, primary text, heavy rules */
+  --color-page: #ffffff; /* card / content surface */
+  --color-canvas: #f6f7f9; /* app background behind cards */
+  --color-red: #d71e28; /* brand rule + active text; EXECUTE; failures */
+  --color-gold: #ffcd41; /* wheel, nav active rule, title & verdict rules */
+  --color-card: #e7e9ee; /* block outline */
+  --color-divider: #eef0f3; /* row separators inside cards */
+  --color-field: #e2e5ea; /* input / select outline */
+  --color-data: #344054; /* mono values, dense body */
+  --color-sub: #667085; /* descriptions, breadcrumb links */
+  --color-muted: #98a2b3; /* labels, overlines, captions */
+  --color-faint: #c0c6d0; /* carets, → affordances, dashed upload border */
+  --color-hairline: #e2e2e2; /* ruled rows on pure-white screens */
+  --color-hover: #fafbfc; /* row hover */
+
+  /* §2 · font stacks */
+  --font-slab: 'Zilla Slab', Georgia, serif;
+  --font-sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+  /* §4 · block shadow */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  select {
+    font-family: inherit;
+  }
+}
