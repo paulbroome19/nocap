@@ -80,17 +80,37 @@ def module_version_6(version: str) -> str:
     return "".join(p.zfill(2) for p in parts)
 
 
+def framework_taxonomy_version(version: str) -> str:
+    """The framework taxonomy version used in EBA entry-point URLs — the
+    major.minor of a DPM release code.
+
+    EBA versions the taxonomy at the framework level (X.Y, e.g. "4.2"). A DPM
+    *revision* (X.Y.Z, e.g. "4.2.1") published on the same framework page reuses
+    that X.Y taxonomy: every module entry point in the 4.2 package lives at
+    ``.../fws/{framework}/4.2/mod/...`` — never ``.../4.2.1/...``. So the URL
+    segment is the major.minor of the release code; using the full revision
+    yields entry points that do not exist (``xbrlce:unresolvableBaseMetadataFile``).
+    """
+    parts = version.split(".")
+    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+        return f"{parts[0]}.{parts[1]}"
+    return version  # already X.Y, or not numeric — use verbatim
+
+
 def entry_point_url(md: PackageMetadata, *, extension: str = "json") -> str:
     """Explicit URL if given (and matching the extension), else the EBA pattern.
 
     ``extension`` is ``json`` for xBRL-CSV and ``xsd`` for xBRL-XML — the same
-    module entry point, different file.
+    module entry point, different file. The version segment is the *framework*
+    taxonomy version (major.minor), so a 4.2.1 DPM resolves against its 4.2
+    taxonomy package (see ``framework_taxonomy_version``).
     """
     if md.entry_point_url and md.entry_point_url.endswith(f".{extension}"):
         return md.entry_point_url
     return (
         "http://www.eba.europa.eu/eu/fr/xbrl/crr/fws/"
-        f"{md.framework_code.lower()}/{md.taxonomy_version}/mod/"
+        f"{md.framework_code.lower()}/"
+        f"{framework_taxonomy_version(md.taxonomy_version)}/mod/"
         f"{md.module_code.lower()}.{extension}"
     )
 

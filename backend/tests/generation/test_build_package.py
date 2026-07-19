@@ -51,6 +51,20 @@ def test_entry_point_derived_and_overridable() -> None:
     assert entry_point_url(metadata(entry_point_url="http://x/y.json")) == "http://x/y.json"
 
 
+def test_entry_point_uses_framework_version_not_dpm_revision() -> None:
+    """A DPM revision code (4.2.1) must resolve to the framework taxonomy entry
+    point (4.2) — the taxonomy is versioned at the framework level. Using 4.2.1
+    would yield xbrlce:unresolvableBaseMetadataFile against the 4.2 package."""
+    from app.generation.service import framework_taxonomy_version
+
+    assert framework_taxonomy_version("4.2.1") == "4.2"
+    assert framework_taxonomy_version("4.2.1.0") == "4.2"
+    assert framework_taxonomy_version("4.2") == "4.2"
+    assert entry_point_url(metadata(taxonomy_version="4.2.1")) == (
+        "http://www.eba.europa.eu/eu/fr/xbrl/crr/fws/corep/4.2/mod/corep_lcr_da.json"
+    )
+
+
 def test_package_structure() -> None:
     pkg = _build()
     root = pkg.filename[:-4]

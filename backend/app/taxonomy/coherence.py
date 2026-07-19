@@ -41,11 +41,9 @@ _MODULE_VERSION = re.compile(r"_(\d+(?:\.\d+)+)")
 
 def _parse_version(text: str | None) -> str | None:
     """The most specific dotted version in ``text`` (the one with the most
-    components), or ``None``.
-
-    Crucially this keeps the *full* version — "4.2.1", not "4.2". The old code
-    truncated to major.minor, so a 4.2.1 DPM and a 4.2 taxonomy package compared
-    equal and no mismatch was reported.
+    components), or ``None``. Callers reduce it to the framework version for
+    comparison (see ``_framework``); the full token is kept here so, e.g., a
+    filename carrying both "4.2" and "4.2.0.0" yields the more specific one.
     """
     if not text:
         return None
@@ -60,20 +58,22 @@ def _version_sort_key(v: str) -> tuple[int, ...]:
     return tuple(int(p) for p in v.split("."))
 
 
-def _versions_agree(a: str, b: str) -> bool:
-    """Whether two dotted versions denote the same framework release.
+def _framework(version: str | None) -> str | None:
+    """The framework taxonomy version (major.minor) of a dotted version.
 
-    Compared component-by-component with missing trailing components treated as
-    zero, so "4.2" agrees with "4.2.0.0" but **not** with "4.2.1". This is what
-    distinguishes a 4.2 taxonomy package from a 4.2.1 DPM — the patch-level
-    mismatch the old major.minor-only check silently accepted.
+    EBA versions the *taxonomy* at the framework level (X.Y, e.g. "4.2"). A DPM
+    *revision* (X.Y.Z, e.g. "4.2.1") published on the same framework page reuses
+    that X.Y taxonomy — its module entry points live at ``.../{framework}/4.2/...``.
+    So coherence compares at the framework level: a 4.2.1 DPM with a 4.2 taxonomy
+    package is the regulator's own correct pairing, **not** a mismatch. Only a
+    genuine framework disagreement (4.1 vs 4.2) is flagged.
     """
-    pa = [int(p) for p in a.split(".")]
-    pb = [int(p) for p in b.split(".")]
-    width = max(len(pa), len(pb))
-    pa += [0] * (width - len(pa))
-    pb += [0] * (width - len(pb))
-    return pa == pb
+    if not version:
+        return None
+    parts = version.split(".")
+    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+        return f"{parts[0]}.{parts[1]}"
+    return version
 
 
 def _dpm_version(
@@ -126,32 +126,37 @@ def coherence_warnings(
     *,
     settings: Settings | None = None,
 ) -> list[str]:
-    """Version-mismatch warnings across the release's functional artifacts."""
+    """Framework-version-mismatch warnings across the release's functional
+    artifacts. Compared at the framework level (major.minor), because that is
+    how EBA versions the taxonomy — a 4.2.1 DPM with a 4.2 taxonomy package is
+    the regulator's correct pairing and must not warn."""
     settings = settings or get_settings()
-    dpm = _dpm_version(db, snapshot, settings)
+    dpm = _framework(_dpm_version(db, snapshot, settings))
     if dpm is None:
         return []  # nothing to compare against
 
     warnings: list[str] = []
 
-    taxo = _taxonomy_version(db, snapshot.id)
-    if taxo is not None and not _versions_agree(taxo, dpm):
+    taxo = _framework(_taxonomy_version(db, snapshot.id))
+    if taxo is not None and taxo != dpm:
         warnings.append(
-            f"The taxonomy package (version {taxo}) does not match the DPM "
-            f"database (version {dpm}). Upload the taxonomy package published "
-            f"for DPM {dpm}, or the DPM for taxonomy {taxo}."
+            f"The taxonomy package (framework {taxo}) does not match the DPM "
+            f"database (framework {dpm}). Upload the taxonomy package published "
+            f"for framework {dpm}, or the DPM for taxonomy {taxo}."
         )
 
     # The rules workbook is legitimately multi-version — a single workbook carries
     # rules for modules across several framework releases. So it is coherent as
-    # long as it *includes* the DPM's version; only warn if none of its versions
-    # match (e.g. a 4.1-only workbook on a 4.2.1 DPM).
-    wb_versions = _workbook_versions(db, snapshot.id)
-    if wb_versions and not any(_versions_agree(v, dpm) for v in wb_versions):
-        listed = ", ".join(sorted(wb_versions, key=_version_sort_key))
+    # long as it *includes* the DPM's framework; only warn if none of its
+    # frameworks match (e.g. a 4.1-only workbook on a 4.2 DPM).
+    wb_frameworks = {
+        f for f in (_framework(v) for v in _workbook_versions(db, snapshot.id)) if f
+    }
+    if wb_frameworks and dpm not in wb_frameworks:
+        listed = ", ".join(sorted(wb_frameworks, key=_version_sort_key))
         warnings.append(
-            f"The validation-rules workbook (versions {listed}) does not include "
-            f"the DPM database's version ({dpm}). Upload the validation rules "
-            f"published for DPM {dpm}."
+            f"The validation-rules workbook (frameworks {listed}) does not "
+            f"include the DPM database's framework ({dpm}). Upload the validation "
+            f"rules published for framework {dpm}."
         )
     return warnings

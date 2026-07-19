@@ -70,8 +70,8 @@ def test_taxonomy_version_mismatch_warns(
     _add_taxo(db_session, release_42.id, "taxo_package_4.1.zip")
     warnings = coherence.coherence_warnings(db_session, release_42)
     assert len(warnings) == 1
-    assert "taxonomy package (version 4.1)" in warnings[0]
-    assert "DPM database (version 4.2)" in warnings[0]
+    assert "taxonomy package (framework 4.1)" in warnings[0]
+    assert "DPM database (framework 4.2)" in warnings[0]
 
 
 def test_workbook_version_mismatch_warns(
@@ -80,8 +80,8 @@ def test_workbook_version_mismatch_warns(
     _add_rule(db_session, release_42.id, "COREP_LCR_DA_4.1")
     warnings = coherence.coherence_warnings(db_session, release_42)
     assert len(warnings) == 1
-    assert "validation-rules workbook (versions 4.1)" in warnings[0]
-    assert "DPM database's version (4.2)" in warnings[0]
+    assert "validation-rules workbook (frameworks 4.1)" in warnings[0]
+    assert "DPM database's framework (4.2)" in warnings[0]
 
 
 def test_unversioned_taxonomy_filename_is_silent(
@@ -105,7 +105,7 @@ def test_ingested_workbook_fixture_is_coherent_with_42(
     assert coherence.coherence_warnings(db_session, release_42) == []
 
 
-# --- patch-level mismatch: the reported 4.2.1-DPM / 4.2-taxonomy bug ---------
+# --- the official 4.2.1-DPM / 4.2-taxonomy pairing is COHERENT ---------------
 
 
 def _write_dpm_release_code(snap_id: int, *rows: tuple[int, int, str]) -> None:
@@ -132,49 +132,45 @@ def _write_dpm_release_code(snap_id: int, *rows: tuple[int, int, str]) -> None:
         conn.close()
 
 
-def test_patch_level_taxonomy_mismatch_warns(
+def test_dpm_revision_matches_framework_taxonomy_is_coherent(
     db_session: Session, release_42: TaxonomySnapshot
 ) -> None:
-    """The exact reported case: the DPM's current release is 4.2.1 (from the
-    release code, not the label), the taxonomy package is 4.2. This used to slip
-    through because the version was truncated to major.minor."""
-    # DPM says 4.2.1 (current release), taxonomy package says 4.2.
+    """The EBA's own published set: the DPM's current release is 4.2.1 (from the
+    release code, not the label) and the taxonomy package is 4.2. That is the
+    correct official pairing — the taxonomy is versioned at the framework level
+    (4.2), and a 4.2.1 DPM reuses it — so there must be NO warning."""
     _write_dpm_release_code(
         release_42.id, (5, 0, "4.2"), (1010000003, -1, "4.2.1")
     )
     _add_taxo(db_session, release_42.id, "taxo_package_4.2_hotfix.zip")
 
-    warnings = coherence.coherence_warnings(db_session, release_42)
-    assert len(warnings) == 1
-    assert "taxonomy package (version 4.2)" in warnings[0]
-    assert "DPM database (version 4.2.1)" in warnings[0]
+    assert coherence.coherence_warnings(db_session, release_42) == []
 
 
-def test_multiversion_workbook_including_dpm_version_is_coherent(
+def test_multiversion_workbook_including_dpm_framework_is_coherent(
     db_session: Session, release_42: TaxonomySnapshot
 ) -> None:
-    """A rules workbook spanning several releases (4.0…4.3) is coherent with a
-    4.2.1 DPM as long as it *includes* 4.2.1 — it must not warn."""
+    """A rules workbook spanning several framework releases (4.0…4.3) is coherent
+    with a 4.2.1 DPM as long as it *includes* the 4.2 framework — no warning."""
     _write_dpm_release_code(release_42.id, (1010000003, -1, "4.2.1"))
-    _add_taxo(db_session, release_42.id, "taxo_package_4.2.1.zip")  # taxonomy ok
+    _add_taxo(db_session, release_42.id, "taxo_package_4.2.zip")  # taxonomy ok
     _add_rule(db_session, release_42.id, "COREP_4.0")
-    _add_rule(db_session, release_42.id, "COREP_4.2")
-    _add_rule(db_session, release_42.id, "COREP_4.2.1")  # includes the DPM version
+    _add_rule(db_session, release_42.id, "COREP_4.2.1")  # framework 4.2 present
     _add_rule(db_session, release_42.id, "COREP_4.3")
     assert coherence.coherence_warnings(db_session, release_42) == []
 
 
-def test_workbook_missing_dpm_version_warns(
+def test_workbook_missing_dpm_framework_warns(
     db_session: Session, release_42: TaxonomySnapshot
 ) -> None:
-    """A workbook that spans 4.0/4.1 but not the 4.2.1 DPM version warns."""
+    """A workbook that spans 4.0/4.1 but not the 4.2 framework of a 4.2.1 DPM."""
     _write_dpm_release_code(release_42.id, (1010000003, -1, "4.2.1"))
     _add_rule(db_session, release_42.id, "COREP_4.0")
     _add_rule(db_session, release_42.id, "COREP_4.1")
     warnings = coherence.coherence_warnings(db_session, release_42)
     assert len(warnings) == 1
     assert "does not include" in warnings[0]
-    assert "(4.2.1)" in warnings[0]
+    assert "(4.2)" in warnings[0]
 
 
 def test_padding_treats_4_2_and_4_2_0_0_as_equal(
