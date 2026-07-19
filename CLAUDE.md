@@ -10,6 +10,19 @@ plus a validation report.
 v1 target: COREP LCR, end to end. FINREP is a fast-follow. The architecture must never
 assume a single reporting suite.
 
+## Behaviour contract — PRODUCT.md is authoritative
+
+[`PRODUCT.md`](PRODUCT.md) at the repo root is the **product behaviour contract**: how
+the system must behave for the reporting analyst who uses it (object lifecycles, frozen
+executions, dependency-change handling, deletion completeness, business vocabulary,
+interaction rules, storage/identity). **This file (CLAUDE.md) is the engineering brief —
+how the system is built.** Where the two touch the same question, **PRODUCT.md wins on
+behaviour and CLAUDE.md wins on structure.**
+
+Any behaviour not covered by PRODUCT.md is a gap in the contract: raise it and get it
+decided, rather than inventing an answer in code. Any code change touching a user-facing
+surface must be checked against PRODUCT.md, not just against these engineering rules.
+
 ## Core principles (do not violate)
 
 1. **Taxonomies are data, not code.** EBA DPM releases are uploaded through the app and
