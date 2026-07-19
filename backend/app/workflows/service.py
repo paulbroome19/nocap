@@ -11,6 +11,7 @@ reference date (never ``now()``), so a run's package is reproducible.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import date
 from pathlib import Path
@@ -23,6 +24,7 @@ from app.core.db import SessionLocal
 from app.core.errors import (
     ArtifactUnavailableError,
     ConflictError,
+    DependencyChangedError,
     NotFoundError,
     ValidationError,
 )
@@ -47,7 +49,11 @@ from app.taxonomy import artifacts as taxonomy_artifacts
 from app.taxonomy import capabilities as taxonomy_caps
 from app.taxonomy import rules as taxonomy_rules
 from app.taxonomy import service as taxonomy
-from app.taxonomy.models import SnapshotStatus, TaxonomySnapshot
+from app.taxonomy.models import (
+    ReleaseArtifact,
+    SnapshotStatus,
+    TaxonomySnapshot,
+)
 from app.taxonomy.service import normalize_template_code, template_of
 from app.validation import register as validation_register
 from app.validation import report as validation_report
@@ -454,6 +460,25 @@ def list_module_templates(
     ]
 
 
+def _release_fingerprint(db: Session, snapshot: TaxonomySnapshot) -> str:
+    """A content fingerprint of a release's artifacts.
+
+    Combines the DPM database checksum with the checksums of every occupied
+    artifact slot (taxonomy package, filing rules, samples), so replacing *any*
+    artifact changes the fingerprint. Order-stable (slots sorted) so it is
+    deterministic for the same set of files.
+    """
+    parts = [f"dpm:{snapshot.checksum or ''}"]
+    artifacts = db.scalars(
+        select(ReleaseArtifact)
+        .where(ReleaseArtifact.snapshot_id == snapshot.id)
+        .order_by(ReleaseArtifact.slot)
+    )
+    for art in artifacts:
+        parts.append(f"{art.slot.value}:{art.checksum}")
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
 def create_run(
     db: Session,
     *,
@@ -531,6 +556,9 @@ def create_run(
         release_id=rid,
         reference_date=reference_date,
         entity_id=entity.id,
+        # Entity values are frozen here and read from the run forever after — a
+        # later rename/edit/deletion of the entity must never alter this run.
+        entity_name=entity.name,
         entity_lei=_validate_lei(entity.lei),
         entity_scope=run_scope,
         country=entity.country.upper(),
@@ -541,6 +569,7 @@ def create_run(
         decimals=decimals if decimals is not None else -3,
         status=RunStatus.created,
         capabilities=caps.to_dict(),
+        release_fingerprint=_release_fingerprint(db, snapshot),
     )
     db.add(run)
     db.commit()
@@ -565,8 +594,90 @@ def instance_identity(run: Run) -> tuple:
     return tuple(getattr(run, f) for f in INSTANCE_IDENTITY)
 
 
+def _entity_scope(entity: Entity) -> str:
+    return entity.default_scope.strip().upper()
+
+
+def detect_dependency_changes(
+    db: Session, src: Run, *, settings: Settings | None = None
+) -> list[dict]:
+    """Changes to a run's live dependencies (entity, release) since it executed.
+
+    Returns one ``{kind, message, ...}`` per entity/release dependency that has
+    changed or disappeared relative to what ``src`` froze — empty if nothing
+    changed. A new execution of the instance must surface these and get explicit
+    confirmation before re-binding; it must never silently proceed.
+    """
+    settings = settings or get_settings()
+    changes: list[dict] = []
+
+    # --- entity ---------------------------------------------------------
+    entity = (
+        db.get(Entity, src.entity_id) if src.entity_id is not None else None
+    )
+    if entity is None:
+        changes.append({
+            "kind": "entity_deleted",
+            "message": "The entity used for this execution no longer exists. "
+            "Select a current entity to continue.",
+        })
+    else:
+        diffs: list[str] = []
+        if src.entity_name is not None and entity.name != src.entity_name:
+            diffs.append(f"name ({src.entity_name} → {entity.name})")
+        if _validate_lei(entity.lei) != src.entity_lei:
+            diffs.append(f"LEI ({src.entity_lei} → {_validate_lei(entity.lei)})")
+        if entity.country.upper() != src.country:
+            diffs.append(f"country ({src.country} → {entity.country.upper()})")
+        if _entity_scope(entity) != src.entity_scope:
+            diffs.append(f"scope ({src.entity_scope} → {_entity_scope(entity)})")
+        if diffs:
+            changes.append({
+                "kind": "entity_changed",
+                "message": "The entity has changed since the last execution: "
+                + ", ".join(diffs) + ". The new execution will use the current "
+                "values.",
+                "fields": diffs,
+            })
+
+    # --- release --------------------------------------------------------
+    snapshot = db.get(TaxonomySnapshot, src.snapshot_id)
+    if snapshot is None:
+        changes.append({
+            "kind": "release_deleted",
+            "message": "The taxonomy release used for this execution no longer "
+            "exists. Select a release to continue.",
+        })
+    else:
+        taxonomy.verify_snapshot(db, snapshot, settings=settings)
+        label = snapshot.display_name
+        if snapshot.status is not SnapshotStatus.ready:
+            changes.append({
+                "kind": "release_unavailable",
+                "message": f"The taxonomy release {label} is no longer usable "
+                "(its files are missing). Re-ingest it or select a release to "
+                "continue.",
+            })
+        elif (
+            src.release_fingerprint is not None
+            and _release_fingerprint(db, snapshot) != src.release_fingerprint
+        ):
+            changes.append({
+                "kind": "release_changed",
+                "message": f"An artifact of the taxonomy release {label} has "
+                "been replaced since the last execution. The new execution will "
+                "use the current files.",
+            })
+
+    return changes
+
+
 def reexecute_run(
-    db: Session, source_run_id: int, *, settings: Settings | None = None
+    db: Session,
+    source_run_id: int,
+    *,
+    acknowledge_changes: bool = False,
+    settings: Settings | None = None,
 ) -> Run:
     """Create a fresh execution of an existing instance (re-execute / resubmit).
 
@@ -574,11 +685,25 @@ def reexecute_run(
     identity (entity, reporting date, instance keys) and its release binding and
     parameters; the source run and all prior executions are untouched. The caller
     then attaches a new fact file and executes, exactly as for a first run.
+
+    Before creating the new execution the instance's live dependencies (entity,
+    release) are checked against what the source run froze; if any have changed
+    or disappeared this raises ``DependencyChangedError`` (carrying the list of
+    changes) unless ``acknowledge_changes=True`` — so the user confirms the
+    re-bind rather than the system silently substituting a dependency.
     """
+    settings = settings or get_settings()
     src = get_run(db, source_run_id)
     if src.entity_id is None:
         raise ValidationError(
             f"run id={source_run_id} has no entity; cannot re-execute"
+        )
+    changes = detect_dependency_changes(db, src, settings=settings)
+    if changes and not acknowledge_changes:
+        raise DependencyChangedError(
+            "The entity or taxonomy release for this instance has changed since "
+            "its last execution. Review the changes and confirm to continue.",
+            details=changes,
         )
     new_run = create_run(
         db,
@@ -884,11 +1009,9 @@ def _report_identity(
     db: Session, run: Run, wf: WorkflowConfig, package_filename: str
 ) -> list[tuple[str, str]]:
     """Run identity label/value pairs for the report header."""
-    entity_name = run.entity_lei
-    if run.entity_id is not None:
-        entity = db.get(Entity, run.entity_id)
-        if entity is not None:
-            entity_name = entity.name
+    # Frozen at execution — read from the run, never resolved live (a later
+    # rename/deletion of the entity must not alter this historical report).
+    entity_name = run.entity_name or run.entity_lei
     snapshot = db.get(TaxonomySnapshot, run.snapshot_id)
     release_label = snapshot.version_label if snapshot is not None else str(
         run.release_id

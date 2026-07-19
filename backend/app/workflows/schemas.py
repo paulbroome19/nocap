@@ -134,6 +134,13 @@ class RunCreate(BaseModel):
     release_id: int | None = None  # defaults to the snapshot's current release
 
 
+class ReexecuteRequest(BaseModel):
+    """Body for re-executing an instance. ``acknowledge_changes`` must be true to
+    proceed when the entity or release has changed since the last execution."""
+
+    acknowledge_changes: bool = False
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -143,6 +150,8 @@ class RunOut(BaseModel):
     release_id: int
     reference_date: date
     entity_id: int | None
+    # Entity values frozen at execution — read these, never the live entity.
+    entity_name: str | None
     entity_lei: str
     entity_scope: str
     country: str
