@@ -49,6 +49,44 @@ def test_create_release_persists_all_three(db_session: Session) -> None:
     assert slots[ReleaseSlot.validation_rules].status is ArtifactStatus.verifying
 
 
+def test_create_release_accepts_pre_converted_sqlite(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """The DPM slot accepts a pre-converted SQLite; provenance records the form."""
+    from app.taxonomy.models import DpmSourceForm
+    from tests.fixtures import dpm_mini
+
+    dpm_sqlite = dpm_mini.build(tmp_path / "dpm.sqlite").read_bytes()
+    snap = _create(
+        db_session, dpm_bytes=dpm_sqlite, dpm_filename="dpm.sqlite"
+    )
+    assert snap.status is SnapshotStatus.ingesting
+    assert snap.dpm_source_form is DpmSourceForm.sqlite
+
+    # Finalises to ready without any mdbtools converter running.
+    def fail(*a, **k):
+        raise AssertionError("converter should not run for the sqlite form")
+
+    service.finalize_release(db_session, snap, converter=fail)
+    assert snap.status is SnapshotStatus.ready
+
+
+def test_create_release_rejects_non_dpm_sqlite(
+    db_session: Session, tmp_path: Path
+) -> None:
+    import sqlite3
+
+    p = tmp_path / "junk.sqlite"
+    conn = sqlite3.connect(p)
+    conn.execute("CREATE TABLE Nope (x INTEGER)")
+    conn.commit()
+    conn.close()
+    with pytest.raises(ValidationError):
+        _create(db_session, dpm_bytes=p.read_bytes(), dpm_filename="junk.sqlite")
+    # Nothing was persisted.
+    assert service.list_snapshots(db_session) == []
+
+
 def test_finalize_makes_release_ready(db_session: Session, mini_dpm: Path) -> None:
     snap = _create(db_session)
 

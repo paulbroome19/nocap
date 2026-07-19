@@ -22,6 +22,9 @@ export interface Snapshot {
   version_label: string
   original_filename: string
   checksum: string
+  // Provenance: how the DPM was supplied (audit evidence, not a label).
+  dpm_source_form: 'accdb' | 'sqlite'
+  dpm_source_label: string
   status: SnapshotStatus
   error: string | null
   uploaded_at: string
