@@ -25,7 +25,8 @@ CREATE TABLE Release (ReleaseID INTEGER PRIMARY KEY, IsCurrent INTEGER NOT NULL,
 CREATE TABLE Framework (FrameworkID INTEGER PRIMARY KEY, Code TEXT, Name TEXT);
 CREATE TABLE Module (ModuleID INTEGER PRIMARY KEY, FrameworkID INTEGER);
 CREATE TABLE ModuleVersion (ModuleVID INTEGER PRIMARY KEY, ModuleID INTEGER, Code TEXT,
-    StartReleaseID INTEGER, EndReleaseID INTEGER, VersionNumber TEXT, Name TEXT);
+    StartReleaseID INTEGER, EndReleaseID INTEGER, VersionNumber TEXT, Name TEXT,
+    FromReferenceDate TEXT, ToReferenceDate TEXT);
 CREATE TABLE ModuleVersionComposition (ModuleVID INTEGER, TableID INTEGER, TableVID INTEGER);
 CREATE TABLE TableVersion (TableVID INTEGER PRIMARY KEY, TableID INTEGER, Code TEXT, Name TEXT,
     StartReleaseID INTEGER, EndReleaseID INTEGER, KeyID INTEGER);
@@ -55,7 +56,8 @@ _ROWS = {
     "Framework": [(1, "COREP", "Common Reporting")],
     "Module": [(1, 1)],
     "ModuleVersion": [
-        (10, 1, "COREP_LCR_DA", 1, None, "3.3.0", "LCR Delegated Act - COREP"),
+        (10, 1, "COREP_LCR_DA", 1, None, "3.3.0", "LCR Delegated Act - COREP",
+         "2024-12-31", None),
     ],
     "ModuleVersionComposition": [(10, 500, 100), (10, 501, 101), (10, 502, 102)],
     "TableVersion": [

@@ -247,3 +247,47 @@ class ValidationRule(Base):
     from_reference_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     to_reference_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     severity: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+
+class ReleaseModule(Base):
+    """A module this release *provides* — recorded at ingest from the DPM's own
+    current (``IsCurrent``) release row, not its full history.
+
+    The DPM is cumulative (it carries historical module versions too), but a
+    release provides only the module versions current at its own release. These
+    rows are the user-selectable surface: the version dropdown, the dedup across
+    releases, and the ingestion summary all read from here — never from the raw
+    DPM history. Historical module versions stay queryable via ``TaxonomyLookup``
+    (existing runs depend on them) but never appear here.
+
+    The selection key across releases is ``(module_code, module_version,
+    framework_version)``: three releases that all provide COREP_LCR_DA 3.3.0 at
+    framework 4.2 collapse to one option; a release that bumps a module's version
+    presents a distinct one.
+    """
+
+    __tablename__ = "release_module"
+    __table_args__ = (
+        Index("ix_release_module_snapshot", "snapshot_id"),
+        Index("ix_release_module_code", "module_code"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("taxonomy_snapshot.id"), index=True
+    )
+    # e.g. "COREP_LCR_DA" — matches WorkflowConfig.module_code.
+    module_code: Mapped[str] = mapped_column(String(128))
+    framework_code: Mapped[str] = mapped_column(String(64))
+    module_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # ModuleVersion.VersionNumber, e.g. "3.3.0" — the module version (also the
+    # version in the package filename). This is what the user selects.
+    module_version: Mapped[str] = mapped_column(String(32))
+    # The framework taxonomy version (major.minor of the DPM release code, e.g.
+    # "4.2"): entry points are versioned at the framework level, and a DPM
+    # revision (4.2.1) reuses the framework's taxonomy. Part of the dedup key.
+    framework_version: Mapped[str] = mapped_column(String(32))
+    # The module version's reference-date applicability window (from the DPM's
+    # ModuleVersion.FromReferenceDate/ToReferenceDate). Supporting detail.
+    valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
