@@ -303,3 +303,57 @@ contexts, units, facts**; canonical short non-semantic ids assigned in first-see
 sorted order (`c1, c2, …`, `uEUR, uPURE`); creation timestamp is a run input; the
 software PI is a fixed literal. "Byte-identical" = run-to-run stable, not
 identical to EBA's sample whitespace.
+
+---
+
+## 11. Step 3 — proof (COREP LCR through Arelle)
+
+The recipe (§1–§7) was derived and reconstruction-verified on the Pillar 3
+IRRBBDIS sample. Step 3 closes the stated COREP gap by putting a generated COREP
+LCR instance through the same Arelle oracle that caught the three CSV bugs. This
+is pinned as `tests/validation/test_formula_guard_xml.py` (the XML twin of the
+CSV `test_formula_guard.py`).
+
+**Setup.** C_72.00.a + C_76.00.a/b of `COREP_LCR_DA` against the real EBA 4.2
+DPM + taxonomy package; every closed cell filed with value `0`; the instance
+generated the app's way (`build_xml_instance` + the real `_make_xml_resolver`
+combining `resolve` with `xml_signature`, real filing-indicator collapse), then
+the bare `.xbrl` loaded into Arelle via `--file` (no `--reportPackage`).
+
+**Result — it binds.**
+
+- 182 closed C_72/C_76 cells; **175 produced an XML signature**, 169 facts after
+  scenario de-duplication.
+- Arelle: **loaded, `unknownPropertyGroup = 0`**, 330 assertions loaded,
+  **52 assertions evaluated** against generated facts (51 satisfied; one
+  `v7596_m` unsatisfied — `{C_76.00.a,r0030,c0010} >= 1` fails because we filed
+  `0`, i.e. the rule *bound to our fact and fired*, which is the point).
+
+**Versioned-metric-namespace question — resolved by real data.** A real COREP
+metric goes through as `eba_met:qCBB` in the **un-versioned** metric namespace
+`http://www.eba.europa.eu/xbrl/crr/dict/met`; the **dimensions** carry the
+release version — `eba_dim_4.0:qCAA = eba_qAI:qx2017`, etc. Arelle accepted the
+QNames with zero unknown-property-group / unresolved-member errors, confirming
+metric = un-versioned, dimension = `eba_dim_{release code}` (§3). No change
+needed.
+
+**The 7 unsignable cells** (C_72.00.a r0030/r0485/r0580/r0590 × c0030/c0040)
+resolve to a datapoint but carry **no metric property** (`property_id` is null),
+so `xml_signature` returns `None` and they are excluded rather than written as
+malformed facts — the airtight behaviour, identical to the CSV path's treatment
+of unresolvable cells.
+
+**Projection cost (Step-2 condition 1).** Projecting `ItemCategory` + `Context`
+alongside the existing tables — parsing `Context.Signature` instead of
+materialising the 1.7M-row `ContextComposition` — costs **+4.6 s ingestion
+(≈10 s total) and +45 MB (84 → 129 MB)** on the real release; `Context` is
+244,993 rows, not 1.7M. The signature lookup reads `Context` by primary key
+(`ContextID`) and `ItemCategory` by `(ItemID, StartReleaseID)`, both indexed by
+the existing keys. Eager projection is therefore kept (no lazy/on-demand path
+needed).
+
+**Operational note.** A snapshot ingested *before* the dimensional projection
+was added has a `dpm.sqlite` without `ItemCategory`/`Context`; it must be
+re-ingested to gain XML capability. The guard re-projects from the stored
+`source.accdb` when it finds a legacy DB, so the proof runs today; the running
+app gains it on the next ingestion of the release.

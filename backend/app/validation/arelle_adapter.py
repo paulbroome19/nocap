@@ -434,9 +434,13 @@ class ArelleFormulaValidator:
     def _arelle_args(
         self, package_path: Path, packages: list[Path]
     ) -> list[str]:
-        args: list[str] = [
-            "--file", str(package_path),
-            "--reportPackage",
+        args: list[str] = ["--file", str(package_path)]
+        # A CSV submission is a report-package zip (--reportPackage); a bare
+        # xBRL-XML instance (.xbrl) loads directly as a file, without it. Arelle
+        # speaks both natively — only the load flag differs.
+        if package_path.suffix.lower() != ".xbrl":
+            args.append("--reportPackage")
+        args += [
             "--validate",
             "--formula", "run",
             # Log per-assertion result counts ("N satisfied, M not satisfied")
