@@ -92,6 +92,31 @@ def test_full_run_derived_is_clean(
     assert not any(f.role is RunFileRole.indicators_params for f in files)
 
 
+def test_version_window_finding_surfaces_on_report_never_blocks(
+    db_session: Session,
+    ready_snapshot: TaxonomySnapshot,
+    lcr_workflow: WorkflowConfig,
+    entity: Entity,
+    demo_fact_xlsx: bytes,
+) -> None:
+    """A reporting date before the version's window records an info finding on
+    the report but still generates — informational, never blocking, never
+    silent. (Mini DPM COREP_LCR_DA 3.3.0 applies from 2024-12-31.)"""
+    run = _create_run(
+        db_session, ready_snapshot, lcr_workflow, entity,
+        reference_date=date(2024, 6, 30),
+    )
+    _attach_facts(db_session, run.id, demo_fact_xlsx)
+    run = service.execute_run(db_session, run.id)
+    # Never blocks — the package is still generated.
+    assert run.status is RunStatus.generated, run.error
+    findings = service.list_findings(db_session, run.id)
+    window = [f for f in findings if f.code == "TAXONOMY_VERSION_WINDOW"]
+    assert len(window) == 1
+    assert window[0].severity is Severity.info
+    assert "applies from 31 Dec 2024" in window[0].message
+
+
 def test_derived_indicators_and_parameters(
     db_session: Session,
     ready_snapshot: TaxonomySnapshot,

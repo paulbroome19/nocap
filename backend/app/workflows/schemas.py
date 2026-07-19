@@ -177,6 +177,9 @@ class RunOut(BaseModel):
     # The taxonomy version the run was executed against, frozen at creation.
     module_version: str | None
     framework_version: str | None
+    # The version's reference-date applicability window, frozen at creation.
+    module_valid_from: date | None
+    module_valid_to: date | None
     # The validation-rule set applied, frozen when validation ran: {count,
     # module_code, module_version, framework_version, reference_date}.
     rule_scope: dict | None

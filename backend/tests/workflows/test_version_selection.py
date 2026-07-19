@@ -179,6 +179,60 @@ def test_create_run_freezes_module_and_framework_version(
     assert run.framework_version == "4.2"
 
 
+def test_version_window_finding(
+    db_session, ready_snapshot, lcr_workflow, entity
+) -> None:
+    """A reporting date outside the version's applicability window yields an
+    informational (never blocking) finding; inside it, none. The mini DPM's
+    COREP_LCR_DA 3.3.0 applies from 2024-12-31."""
+    from datetime import date
+
+    from app.validation.models import Severity
+    from app.workflows import service as wf_service
+
+    def _run(ref: date):
+        return wf_service.create_run(
+            db_session, workflow_id=lcr_workflow.id,
+            snapshot_id=ready_snapshot.id, reference_date=ref, entity_id=entity.id,
+        )
+
+    # The window is frozen on the run at creation (read from release_module).
+    run_before = _run(date(2024, 6, 30))
+    assert run_before.module_valid_from == date(2024, 12, 31)
+
+    # Before the window → informational finding naming the window + the date.
+    before = wf_service._version_window_finding(run_before)
+    assert before is not None
+    assert before.severity is Severity.info
+    assert before.code == "TAXONOMY_VERSION_WINDOW"
+    assert "applies from 31 Dec 2024" in before.message
+    assert "30 Jun 2024" in before.message
+
+    # Inside the window → no finding.
+    assert wf_service._version_window_finding(_run(date(2026, 3, 31))) is None
+
+
+def test_window_finding_reconstructible_after_release_deleted(
+    db_session, ready_snapshot, lcr_workflow, entity
+) -> None:
+    """The window is frozen on the run, so its report reconstructs even after
+    the release (and its release_module rows) are deleted."""
+    from datetime import date
+
+    from app.taxonomy import service as taxonomy
+    from app.workflows import service as wf_service
+
+    run = wf_service.create_run(
+        db_session, workflow_id=lcr_workflow.id, snapshot_id=ready_snapshot.id,
+        reference_date=date(2024, 6, 30), entity_id=entity.id,
+    )
+    taxonomy.delete_release(db_session, ready_snapshot)  # release + its modules gone
+    db_session.expire(run)
+    finding = wf_service._version_window_finding(run)
+    assert finding is not None
+    assert "applies from 31 Dec 2024" in finding.message
+
+
 def test_provisions_endpoint(client, db_session, three_releases) -> None:
     _wf(db_session, "COREP LCR", "COREP_LCR_DA")
     _wf(db_session, "FINREP 9", "FINREP9")

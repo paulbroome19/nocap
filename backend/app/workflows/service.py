@@ -51,6 +51,7 @@ from app.taxonomy import rules as taxonomy_rules
 from app.taxonomy import service as taxonomy
 from app.taxonomy.models import (
     ReleaseArtifact,
+    ReleaseModule,
     SnapshotStatus,
     TaxonomySnapshot,
 )
@@ -571,6 +572,18 @@ def create_run(
         run_module_version = meta.module_version
         run_framework_version = taxonomy.framework_version(lk.release_code(rid))
 
+    # Freeze the version's reference-date applicability window (from the release's
+    # recorded module) so the report's out-of-window finding stays reconstructible
+    # even after the release is deleted.
+    provided = db.scalar(
+        select(ReleaseModule).where(
+            ReleaseModule.snapshot_id == snapshot.id,
+            ReleaseModule.module_code == wf.module_code,
+        )
+    )
+    run_valid_from = provided.valid_from if provided is not None else None
+    run_valid_to = provided.valid_to if provided is not None else None
+
     # Capture the release's capability set at execution binding (reproducibility;
     # capabilities are otherwise derived on read).
     caps = taxonomy_caps.derive_capabilities(
@@ -598,6 +611,8 @@ def create_run(
         capabilities=caps.to_dict(),
         module_version=run_module_version,
         framework_version=run_framework_version,
+        module_valid_from=run_valid_from,
+        module_valid_to=run_valid_to,
         release_fingerprint=_release_fingerprint(db, snapshot),
     )
     db.add(run)
@@ -1113,6 +1128,48 @@ def _append_findings(db: Session, run_id: int, findings: list[Finding]) -> None:
     db.commit()
 
 
+def _version_window_finding(run: Run) -> Finding | None:
+    """An informational finding when the run's reporting date falls outside the
+    selected taxonomy version's reference-date applicability window.
+
+    Never blocking — the user chose the version deliberately — but recorded so
+    the mismatch is on the report, not silent. Read from the window **frozen on
+    the run** at creation, so the report stays reconstructible after the release
+    is deleted.
+    """
+    when = run.reference_date.strftime("%d %b %Y")
+    version = run.module_version or ""
+    if (
+        run.module_valid_from is not None
+        and run.reference_date < run.module_valid_from
+    ):
+        return Finding(
+            severity=Severity.info,
+            phase=ValidationPhase.pre_generation,
+            code="TAXONOMY_VERSION_WINDOW",
+            message=(
+                f"The selected taxonomy version {version} applies from "
+                f"{run.module_valid_from.strftime('%d %b %Y')}, but this "
+                f"submission's reporting date is {when}."
+            ),
+        )
+    if (
+        run.module_valid_to is not None
+        and run.reference_date > run.module_valid_to
+    ):
+        return Finding(
+            severity=Severity.info,
+            phase=ValidationPhase.pre_generation,
+            code="TAXONOMY_VERSION_WINDOW",
+            message=(
+                f"The selected taxonomy version {version} applies until "
+                f"{run.module_valid_to.strftime('%d %b %Y')}, but this "
+                f"submission's reporting date is {when}."
+            ),
+        )
+    return None
+
+
 def _run_module_scope(db: Session, run: Run) -> tuple[str | None, str | None]:
     """The (module_code, framework_version) a run's rules are scoped to. The
     module comes from the workflow; the framework version is frozen on the run.
@@ -1440,6 +1497,13 @@ def execute_run(
                     required_empty=required_empty,
                 ),
             )
+
+            # The selected taxonomy version may not apply to this reporting date.
+            # Informational only — the user chose it — but never silent. Read
+            # from the window frozen on the run, so it survives release deletion.
+            window_finding = _version_window_finding(run)
+            if window_finding is not None:
+                findings.append(window_finding)
 
             metadata = PackageMetadata(
                 entity_lei=run.entity_lei,

@@ -119,6 +119,20 @@ export default function SuitePage() {
     factFile !== null &&
     busy === null
 
+  // The chosen version may not apply to the reporting date. ISO dates compare
+  // correctly as strings. Informational only — never blocks — but never silent.
+  const windowWarning = useMemo(() => {
+    if (!selectedVersion || reportingDate === '') return null
+    const { valid_from, valid_to } = selectedVersion
+    if (valid_from && reportingDate < valid_from) {
+      return `This version applies from ${formatDate(valid_from)} — your reporting date is ${formatDate(reportingDate)}.`
+    }
+    if (valid_to && reportingDate > valid_to) {
+      return `This version applies until ${formatDate(valid_to)} — your reporting date is ${formatDate(reportingDate)}.`
+    }
+    return null
+  }, [selectedVersion, reportingDate])
+
   async function handleExecute() {
     if (entityId === '' || selectedVersion === null || !factFile) return
     setError(null)
@@ -255,6 +269,12 @@ export default function SuitePage() {
                         {selectedVersion.provided_by.length === 1
                           ? `provided by ${selectedVersion.provided_by[0]}`
                           : `provided by ${selectedVersion.provided_by.length} releases (${selectedVersion.provided_by.join(', ')})`}
+                      </p>
+                    )}
+                    {windowWarning && (
+                      <p className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-snug text-red">
+                        <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-red" />
+                        {windowWarning}
                       </p>
                     )}
                   </label>
