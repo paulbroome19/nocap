@@ -63,6 +63,76 @@ def test_empty_upload_rejected(db_session: Session) -> None:
         _register(db_session, b"")
 
 
+# --- streaming (memory-safe) DPM handling ----------------------------------
+
+
+def test_register_from_path_streams_and_moves_source(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """The streaming path checksums the file in chunks and *moves* it into the
+    snapshot dir — never buffering it — so a ~720 MB DPM stays off the heap."""
+    src = tmp_path / "upload.accdb"
+    src.write_bytes(b"Standard ACE DB fake body " * 4)
+    expected = service.compute_checksum_file(src)
+
+    snap = service.register_snapshot(
+        db_session, source_path=src, filename="DPM.accdb", version_label="4.2"
+    )
+    assert snap.status is SnapshotStatus.ingesting
+    assert snap.checksum == expected
+    # The temp upload was moved (consumed), and the source now lives in place.
+    assert not src.exists()
+    stored = service._source_path(get_settings(), snap.id)
+    assert stored.exists() and service.compute_checksum_file(stored) == expected
+
+
+def test_register_requires_exactly_one_source(db_session: Session) -> None:
+    with pytest.raises(ValueError):
+        service.register_snapshot(
+            db_session, filename="DPM.accdb", version_label="4.2"
+        )
+
+
+def test_verify_dpm_path_accepts_access_header(tmp_path: Path) -> None:
+    from app.taxonomy.models import DpmSourceForm
+
+    p = tmp_path / "DPM.accdb"
+    p.write_bytes(b"\x00\x01Standard ACE DB\x00 rest of file")
+    assert (
+        service.verify_dpm_path(p, "DPM.accdb") is DpmSourceForm.accdb
+    )
+
+
+def test_verify_dpm_path_rejects_non_access(tmp_path: Path) -> None:
+    p = tmp_path / "DPM.accdb"
+    p.write_bytes(b"PK\x03\x04 this is a zip, not access")
+    with pytest.raises(ValidationError, match="EBA DPM"):
+        service.verify_dpm_path(p, "DPM.accdb")
+
+
+def test_verify_dpm_path_accepts_converted_sqlite(mini_dpm: Path) -> None:
+    from app.taxonomy.models import DpmSourceForm
+
+    assert (
+        service.verify_dpm_path(mini_dpm, "dpm.sqlite") is DpmSourceForm.sqlite
+    )
+
+
+def test_exec_sql_stream_flushes_in_batches(tmp_path: Path) -> None:
+    """Every statement lands even when the stream far exceeds one batch, and no
+    statement is split across a flush."""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.executescript("CREATE TABLE t (id INTEGER, v TEXT);")
+    n = 5000
+    lines = [f"INSERT INTO t (id, v) VALUES ({i}, 'row {i}');\n" for i in range(n)]
+    # A tiny batch size forces many flushes over the boundary logic.
+    service._exec_sql_stream(conn, iter(lines), batch_bytes=1024)
+    assert conn.execute("SELECT count(*) FROM t").fetchone()[0] == n
+    assert conn.execute("SELECT v FROM t WHERE id = 4999").fetchone()[0] == "row 4999"
+
+
 def test_ingest_success_marks_ready_and_lookup_works(
     db_session: Session, mini_dpm: Path
 ) -> None:
