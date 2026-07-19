@@ -25,6 +25,7 @@ from app.workflows.schemas import (
     EntityWrite,
     FactRowOut,
     OutputFormatWrite,
+    ReexecuteRequest,
     RegisterRowOut,
     RegulatorFormatOut,
     RunCreate,
@@ -309,13 +310,21 @@ def create_run(body: RunCreate, db: Session = Depends(get_db)) -> RunOut:
 
 
 @router.post("/runs/{run_id}/reexecute", response_model=RunOut, status_code=201)
-def reexecute_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
+def reexecute_run(
+    run_id: int,
+    body: ReexecuteRequest | None = None,
+    db: Session = Depends(get_db),
+) -> RunOut:
     """Create a fresh execution of an existing instance (re-execute / resubmit).
 
     Returns a new run in ``created`` status carrying the source run's instance
-    identity; the caller attaches a fact file and executes it.
+    identity; the caller attaches a fact file and executes it. If the entity or
+    release has changed since the last execution, responds 409
+    ``dependency_changed`` with the list of changes; the client confirms and
+    retries with ``acknowledge_changes: true``.
     """
-    run = service.reexecute_run(db, run_id)
+    acknowledge = body.acknowledge_changes if body is not None else False
+    run = service.reexecute_run(db, run_id, acknowledge_changes=acknowledge)
     return RunOut.model_validate(run)
 
 

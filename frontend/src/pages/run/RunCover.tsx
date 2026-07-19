@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   attachFactFile,
+  DependencyChangedError,
   executeRun,
   reexecuteRun,
+  type DependencyChange,
   type Run,
 } from '../../api/workflows'
 import RunStatusBadge from '../../components/RunStatusBadge'
@@ -72,8 +74,11 @@ export default function RunCover() {
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [changes, setChanges] = useState<DependencyChange[] | null>(null)
 
-  const entityName = entity?.name ?? run.entity_lei
+  // Frozen at execution — read from the run, never the live entity (which is
+  // still fetched for other purposes but must not drive historical identity).
+  const entityName = run.entity_name ?? entity?.name ?? run.entity_lei
   const templateCount = useMemo(
     () => new Set((facts ?? []).map((f) => f.template_code)).size,
     [facts],
@@ -83,18 +88,26 @@ export default function RunCover() {
   const notFiled = fis.length - filed
   const pkg = detail.files.find((f) => f.role === 'package_output')
 
-  async function handleResubmit() {
+  async function runResubmit(acknowledge: boolean) {
     if (!file) return
     setError(null)
+    setChanges(null)
     try {
       setBusy('Creating execution…')
-      const fresh = await reexecuteRun(id)
+      const fresh = await reexecuteRun(id, acknowledge)
       setBusy('Uploading facts…')
       await attachFactFile(fresh.id, file)
       setBusy('Generating & validating…')
       await executeRun(fresh.id)
       navigate(`/reporting/runs/${fresh.id}`)
     } catch (e) {
+      if (e instanceof DependencyChangedError) {
+        // The entity or release changed since the last execution — surface what
+        // changed and require explicit confirmation before re-binding.
+        setChanges(e.changes)
+        setBusy(null)
+        return
+      }
       setError(e instanceof Error ? e.message : String(e))
       setBusy(null)
     }
@@ -237,29 +250,67 @@ export default function RunCover() {
               disabled={busy !== null}
               compact
             />
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className={primaryBtn}
-                disabled={!file || busy !== null}
-                onClick={() => void handleResubmit()}
-              >
-                Resubmit
-              </button>
-              <button
-                type="button"
-                className={secondaryBtn}
-                disabled={busy !== null}
-                onClick={() => {
-                  setResubmitOpen(false)
-                  setFile(null)
-                }}
-              >
-                Cancel
-              </button>
-              {busy && <span className="text-sm text-slate-500">{busy}</span>}
-              <ErrorText>{error}</ErrorText>
-            </div>
+            {changes && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+                <div className="text-sm font-semibold text-amber-900">
+                  Confirm before re-executing
+                </div>
+                <p className="mt-1 text-xs text-amber-800">
+                  The entity or taxonomy release has changed since this
+                  instance's last execution. Review what changed, then confirm to
+                  execute against the current values.
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-900">
+                  {changes.map((c, i) => (
+                    <li key={i}>{c.message}</li>
+                  ))}
+                </ul>
+                <div className="mt-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    className={primaryBtn}
+                    disabled={busy !== null}
+                    onClick={() => void runResubmit(true)}
+                  >
+                    Confirm &amp; re-execute
+                  </button>
+                  <button
+                    type="button"
+                    className={secondaryBtn}
+                    disabled={busy !== null}
+                    onClick={() => setChanges(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {!changes && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className={primaryBtn}
+                  disabled={!file || busy !== null}
+                  onClick={() => void runResubmit(false)}
+                >
+                  Resubmit
+                </button>
+                <button
+                  type="button"
+                  className={secondaryBtn}
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setResubmitOpen(false)
+                    setFile(null)
+                    setChanges(null)
+                  }}
+                >
+                  Cancel
+                </button>
+                {busy && <span className="text-sm text-slate-500">{busy}</span>}
+                <ErrorText>{error}</ErrorText>
+              </div>
+            )}
           </div>
         )}
       </Card>

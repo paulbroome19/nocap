@@ -163,6 +163,8 @@ export interface Run {
   release_id: number
   reference_date: string
   entity_id: number | null
+  // Entity values frozen at execution — render these, never the live entity.
+  entity_name: string | null
   entity_lei: string
   entity_scope: string
   country: string
@@ -311,13 +313,56 @@ export interface CreateRunBody {
 export const createRun = (body: CreateRunBody) =>
   sendJSON<Run>('POST', '/api/workflows/runs', body)
 
+/** One live-dependency change detected before a re-execution. */
+export interface DependencyChange {
+  kind: string
+  message: string
+  fields?: string[]
+}
+
+/** Thrown by {@link reexecuteRun} when the entity or release changed and the
+ *  caller has not yet acknowledged; carries the changes to show the user. */
+export class DependencyChangedError extends Error {
+  changes: DependencyChange[]
+  constructor(message: string, changes: DependencyChange[]) {
+    super(message)
+    this.name = 'DependencyChangedError'
+    this.changes = changes
+  }
+}
+
 /**
- * Re-execute / resubmit an existing instance (FR 1.12). Creates a new run
- * carrying the source run's instance identity (entity, date, keys); the caller
- * then attaches a fact file and executes it.
+ * Re-execute / resubmit an existing instance (full resubmission). Creates a new
+ * run carrying the source run's instance identity (entity, date, keys); the
+ * caller then attaches a fact file and executes it.
+ *
+ * If the entity or taxonomy release has changed since the last execution, the
+ * server responds 409 and this throws {@link DependencyChangedError} with the
+ * list of changes — never re-binding silently. Retry with `acknowledge = true`
+ * once the user has confirmed.
  */
-export const reexecuteRun = (runId: number) =>
-  sendJSON<Run>('POST', `/api/workflows/runs/${runId}/reexecute`)
+export async function reexecuteRun(
+  runId: number,
+  acknowledge = false,
+): Promise<Run> {
+  const res = await fetch(`/api/workflows/runs/${runId}/reexecute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ acknowledge_changes: acknowledge }),
+  })
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null)
+    if (body?.error?.code === 'dependency_changed') {
+      throw new DependencyChangedError(
+        body.error.message ?? 'Dependencies changed',
+        (body.error.details ?? []) as DependencyChange[],
+      )
+    }
+    throw new Error(body?.error?.message ?? res.statusText)
+  }
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
 
 export const attachFactFile = (runId: number, file: File) =>
   postFile(`/api/workflows/runs/${runId}/fact-file`, file)

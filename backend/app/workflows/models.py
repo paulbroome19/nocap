@@ -209,10 +209,16 @@ class Run(Base):
     release_id: Mapped[int] = mapped_column(Integer)
 
     reference_date: Mapped[date] = mapped_column(Date)
-    # Entity is captured by reference and denormalised for reproducibility.
+    # Entity is captured by reference and denormalised for reproducibility. The
+    # entity *values* (name, LEI, scope, country) are frozen onto the run at
+    # creation so a later rename/edit/deletion of the entity never alters this
+    # historical execution — surfaces read these, never the live Entity row.
     entity_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("entity.id"), nullable=True
     )
+    # Nullable only for rows created before the freeze (backfilled from the
+    # entity at migration time; see the migration note). New runs always set it.
+    entity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     entity_lei: Mapped[str] = mapped_column(String(64))
     # Scope is taken from the entity record at creation (no per-run input).
     entity_scope: Mapped[str] = mapped_column(String(16))  # IND | CON
@@ -252,6 +258,15 @@ class Run(Base):
     # The release capability set active when the run was created, captured for
     # reproducibility (capabilities are otherwise derived on read, never stored).
     capabilities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # A content fingerprint of the bound release's artifacts (DPM + slot
+    # checksums) at creation. A new execution of the same instance compares the
+    # release's current fingerprint against this to detect that an artifact was
+    # replaced, and stops for confirmation. Null on runs created before the
+    # freeze (no baseline recorded — see the dependency-change guard).
+    release_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
 
     # Real in v2 when auth lands; nullable in v1.
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)

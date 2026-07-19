@@ -42,6 +42,20 @@ class ConflictError(AppError):
     code = "conflict"
 
 
+class DependencyChangedError(AppError):
+    """A new execution's live dependency (entity or release) has changed or
+    disappeared since the instance's last execution.
+
+    409 Conflict; ``details`` carries the list of changes (each with a ``kind``
+    and a plain-language ``message``) so the client can name what changed and ask
+    the user to confirm before re-binding. Distinct ``code`` so the client can
+    tell it apart from an ordinary conflict.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "dependency_changed"
+
+
 class ArtifactUnavailableError(AppError):
     """A known record's stored bytes are missing at the storage root.
 
