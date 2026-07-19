@@ -49,6 +49,38 @@ def metadata(**overrides) -> PackageMetadata:
     return PackageMetadata(**base)
 
 
+_QName = namedtuple("_QName", ["prefix", "namespace", "local"])
+_Member = namedtuple("_Member", ["dimension", "member"])
+_XmlRes = namedtuple("_XmlRes", ["metric", "members", "datatype_code"])
+
+_DICT = "http://www.eba.europa.eu/xbrl/crr/dict"
+
+
+def met(local: str) -> _QName:
+    return _QName("eba_met", f"{_DICT}/met", local)
+
+
+def dim(ver: str, local: str) -> _QName:
+    return _QName(f"eba_dim_{ver}", f"{_DICT}/dim/{ver}", local)
+
+
+def mem(domain: str, local: str) -> _QName:
+    return _QName(f"eba_{domain}", f"{_DICT}/dom/{domain}", local)
+
+
+def xml_resolver(mapping: dict[tuple[str, str, str], _XmlRes]):
+    """Fake XmlResolver from {(template,row,col): _XmlRes}."""
+
+    def _resolve(template: str, row: str, column: str):
+        return mapping.get((template, row, column))
+
+    return _resolve
+
+
+def xml_res(metric: _QName, members: list[_Member], datatype: str) -> _XmlRes:
+    return _XmlRes(metric, members, datatype)
+
+
 def open_zip(content: bytes) -> zipfile.ZipFile:
     return zipfile.ZipFile(io.BytesIO(content))
 

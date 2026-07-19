@@ -80,14 +80,18 @@ def module_version_6(version: str) -> str:
     return "".join(p.zfill(2) for p in parts)
 
 
-def entry_point_url(md: PackageMetadata) -> str:
-    """Explicit URL if given, else derived by the validated EBA pattern."""
-    if md.entry_point_url:
+def entry_point_url(md: PackageMetadata, *, extension: str = "json") -> str:
+    """Explicit URL if given (and matching the extension), else the EBA pattern.
+
+    ``extension`` is ``json`` for xBRL-CSV and ``xsd`` for xBRL-XML — the same
+    module entry point, different file.
+    """
+    if md.entry_point_url and md.entry_point_url.endswith(f".{extension}"):
         return md.entry_point_url
     return (
         "http://www.eba.europa.eu/eu/fr/xbrl/crr/fws/"
         f"{md.framework_code.lower()}/{md.taxonomy_version}/mod/"
-        f"{md.module_code.lower()}.json"
+        f"{md.module_code.lower()}.{extension}"
     )
 
 
