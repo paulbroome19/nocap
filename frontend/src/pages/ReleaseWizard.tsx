@@ -127,45 +127,6 @@ export default function ReleaseWizard() {
           ))}
         </div>
 
-        <details className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-          <summary className="cursor-pointer font-medium text-slate-700">
-            Is the DPM database too large to upload? Convert it first
-          </summary>
-          <div className="mt-3 space-y-2">
-            <p>
-              The EBA “DPM 2.0” database is a Microsoft Access file of around
-              720&nbsp;MB — large and slow to upload. You can convert it to a
-              compact database (about 80&nbsp;MB) on your own computer and upload
-              that instead. It produces exactly the same result.
-            </p>
-            <p>
-              Once (install the converter):{' '}
-              <code className="rounded bg-slate-200 px-1 py-0.5">
-                brew install mdbtools
-              </code>{' '}
-              on macOS, or{' '}
-              <code className="rounded bg-slate-200 px-1 py-0.5">
-                sudo apt-get install -y mdbtools
-              </code>{' '}
-              on Ubuntu.
-            </p>
-            <p>Then, from the project’s{' '}
-              <code className="rounded bg-slate-200 px-1 py-0.5">backend</code>{' '}
-              folder, run:
-            </p>
-            <pre className="overflow-x-auto rounded bg-slate-800 px-3 py-2 text-[11px] text-slate-100">
-              python -m app.taxonomy.convert "DPM_Database_2.0.accdb" dpm.sqlite
-            </pre>
-            <p>
-              Upload the resulting <code className="rounded bg-slate-200 px-1 py-0.5">
-              dpm.sqlite</code> here in place of the .accdb. Full steps are in{' '}
-              <code className="rounded bg-slate-200 px-1 py-0.5">
-                docs/deployment.md
-              </code>.
-            </p>
-          </div>
-        </details>
-
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
