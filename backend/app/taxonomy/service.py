@@ -223,6 +223,19 @@ def compute_checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def compute_checksum_file(path: Path, *, chunk: int = 1024 * 1024) -> str:
+    """sha256 of a file, read in chunks — never loads the whole file into memory.
+
+    Used for the DPM, which can be ~720 MB: buffering it in a bytes object was
+    the out-of-memory cause behind the silent finalize kill.
+    """
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Access -> SQLite conversion (mdbtools)
 # ---------------------------------------------------------------------------
@@ -251,6 +264,30 @@ def _extract_creates(schema_sql: str, tables: list[str]) -> str:
     return "\n".join(blocks) + "\n"
 
 
+def _exec_sql_stream(
+    conn: sqlite3.Connection, lines, *, batch_bytes: int = 4 * 1024 * 1024
+) -> None:
+    """Execute a stream of ``mdb-export`` SQL lines against ``conn`` in bounded
+    batches, so a large table never materialises as one big string in memory.
+
+    ``mdb-export -I sqlite`` emits one ``INSERT … ;`` per row. We accumulate
+    lines and flush with ``executescript`` only at a ``;``-terminated line (a
+    statement boundary) once the batch exceeds ``batch_bytes`` — so Python holds
+    at most one batch, and no statement is ever split across a flush.
+    """
+    batch: list[str] = []
+    size = 0
+    for line in lines:
+        batch.append(line)
+        size += len(line)
+        if size >= batch_bytes and line.rstrip().endswith(";"):
+            conn.executescript("".join(batch))
+            batch.clear()
+            size = 0
+    if batch:
+        conn.executescript("".join(batch))
+
+
 def convert_accdb_to_sqlite(
     accdb: Path,
     out_sqlite: Path,
@@ -261,7 +298,13 @@ def convert_accdb_to_sqlite(
     """Convert the needed DPM tables from an Access file into a SQLite file.
 
     Uses mdbtools: ``mdb-schema`` for DDL and ``mdb-export -I sqlite`` for rows.
+    The per-table row export is **streamed** row-by-row from ``mdb-export``'s
+    stdout into SQLite in small batches (see ``_exec_sql_stream``), rather than
+    captured whole — a ~720 MB DPM's largest table would otherwise buffer
+    hundreds of MB of INSERT text in memory and OOM the container.
     """
+    import tempfile
+
     if out_sqlite.exists():
         out_sqlite.unlink()
     try:
@@ -288,14 +331,26 @@ def convert_accdb_to_sqlite(
     try:
         conn.executescript(creates)
         for table in tables:
-            inserts = subprocess.run(
-                [settings.mdb_export_bin, "-I", "sqlite", str(accdb), table],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
-            if inserts.strip():
-                conn.executescript(inserts)
+            # Stream mdb-export's stdout into SQLite; keep stderr in a temp file
+            # so a chatty warning stream can't deadlock the stdout pipe.
+            with tempfile.TemporaryFile("w+") as errf:
+                proc = subprocess.Popen(
+                    [settings.mdb_export_bin, "-I", "sqlite", str(accdb), table],
+                    stdout=subprocess.PIPE,
+                    stderr=errf,
+                    text=True,
+                )
+                try:
+                    _exec_sql_stream(conn, proc.stdout)
+                finally:
+                    if proc.stdout is not None:
+                        proc.stdout.close()
+                    proc.wait()
+                if proc.returncode != 0:
+                    errf.seek(0)
+                    raise ConversionError(
+                        f"mdb-export failed for table {table}: {errf.read()}"
+                    )
         conn.commit()
     finally:
         conn.close()
@@ -349,7 +404,8 @@ def validate_dpm_sqlite(sqlite_path: Path) -> None:
 def register_snapshot(
     db: Session,
     *,
-    file_bytes: bytes,
+    file_bytes: bytes | None = None,
+    source_path: Path | None = None,
     filename: str,
     version_label: str,
     regulator_id: int | None = None,
@@ -358,21 +414,32 @@ def register_snapshot(
 ) -> TaxonomySnapshot:
     """Persist a new snapshot (status=ingesting) and store the uploaded file.
 
-    Rejects a re-upload of identical bytes (duplicate checksum). ``regulator_id``
-    defaults to the EBA — the platform's default taxonomy publisher.
-    ``source_form`` records whether the DPM arrived as the original Access file
-    or a pre-converted SQLite, and decides the stored original's filename.
+    Supply the DPM as either ``file_bytes`` (small callers, tests) or
+    ``source_path`` (a file already streamed to disk — the memory-safe path for
+    the ~720 MB Access original, which is checksummed in chunks and *moved* into
+    place rather than buffered). Rejects a re-upload of an identical, usable
+    release (duplicate checksum) and reclaims an incomplete earlier attempt.
+    ``regulator_id`` defaults to the EBA; ``source_form`` decides the stored
+    original's filename.
     """
     settings = settings or get_settings()
-    if not file_bytes:
-        raise ValidationError("uploaded file is empty")
+    if (file_bytes is None) == (source_path is None):
+        raise ValueError("provide exactly one of file_bytes or source_path")
+
+    if file_bytes is not None:
+        if not file_bytes:
+            raise ValidationError("uploaded file is empty")
+        checksum = compute_checksum(file_bytes)
+    else:
+        if not source_path.exists() or source_path.stat().st_size == 0:
+            raise ValidationError("uploaded file is empty")
+        checksum = compute_checksum_file(source_path)
 
     if regulator_id is None:
         from app.taxonomy.seed import eba
 
         regulator_id = eba(db).id
 
-    checksum = compute_checksum(file_bytes)
     existing = db.scalar(
         select(TaxonomySnapshot).where(TaxonomySnapshot.checksum == checksum)
     )
@@ -409,7 +476,13 @@ def register_snapshot(
 
     directory = snapshot_dir(settings, snapshot.id)
     directory.mkdir(parents=True, exist_ok=True)
-    _source_path(settings, snapshot.id, source_form).write_bytes(file_bytes)
+    dest = _source_path(settings, snapshot.id, source_form)
+    if file_bytes is not None:
+        dest.write_bytes(file_bytes)
+    else:
+        # Move the already-streamed upload into place (same volume → atomic
+        # rename; never re-reads the file into memory).
+        shutil.move(str(source_path), str(dest))
 
     logger.info(
         "registered snapshot id=%s checksum=%s form=%s",
@@ -536,6 +609,68 @@ def _verify_dpm_sqlite_bytes(data: bytes) -> None:
         )
 
 
+def _verify_dpm_sqlite_path(path: Path) -> None:
+    """Verify a pre-converted SQLite DPM already on disk (streamed, not buffered).
+
+    The on-disk twin of ``_verify_dpm_sqlite_bytes``: reads only the 16-byte
+    magic, then probes the DPM tables directly against the file — so a ~700 MB
+    SQLite is never loaded into memory.
+    """
+    with path.open("rb") as f:
+        magic = f.read(16)
+    if magic != _SQLITE_MAGIC:
+        raise ValidationError(
+            "This .sqlite file is not a SQLite database. Supply the "
+            "dpm.sqlite produced by converting the EBA DPM 2.0 Access database "
+            "with the documented command."
+        )
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        problem = _dpm_probe_error(conn)
+    finally:
+        conn.close()
+    if problem is not None:
+        raise ValidationError(
+            "This SQLite file is not a converted EBA DPM database "
+            f"({problem}). Convert the EBA DPM 2.0 Access database with the "
+            "documented command and upload the resulting dpm.sqlite."
+        )
+
+
+def verify_dpm_path(
+    path: Path, filename: str, *, verifier=looks_like_access
+) -> DpmSourceForm:
+    """Verify a DPM database already streamed to disk and return its input form.
+
+    The on-disk twin of ``verify_dpm_file`` — same rules and messages — but it
+    reads only the header (Access) or probes the file directly (SQLite), so the
+    720 MB DPM is never held in memory. Used by the streaming upload path.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        raise ValidationError("The DPM database file is empty.")
+    suffix = Path(filename).suffix.lower()
+    if suffix in _ACCESS_SUFFIXES:
+        with path.open("rb") as f:
+            head = f.read(1024)
+        if not verifier(head):
+            raise ValidationError(
+                "This is not the EBA DPM database. The EBA DPM 2.0 download is "
+                "a Microsoft Access .accdb file; this file looks like something "
+                "else (a zip or spreadsheet). Upload the .accdb from the EBA "
+                "reporting-frameworks page."
+            )
+        return DpmSourceForm.accdb
+    if suffix in _SQLITE_SUFFIXES:
+        _verify_dpm_sqlite_path(path)
+        return DpmSourceForm.sqlite
+    raise ValidationError(
+        "This is not the EBA DPM database. Upload either the DPM 2.0 database "
+        "from the EBA reporting-frameworks page — a Microsoft Access file "
+        "(.accdb) — or, if that file is too large to upload, a pre-converted "
+        "DPM database (.sqlite) made with the documented conversion command."
+    )
+
+
 def verify_dpm_file(
     data: bytes, filename: str, *, verifier=looks_like_access
 ) -> DpmSourceForm:
@@ -623,7 +758,8 @@ def begin_release(
     *,
     regulator_id: int,
     version_label: str,
-    dpm_bytes: bytes,
+    dpm_bytes: bytes | None = None,
+    dpm_path: Path | None = None,
     dpm_filename: str,
     taxonomy_bytes: bytes,
     taxonomy_filename: str,
@@ -635,24 +771,32 @@ def begin_release(
     """Phase 1 of creation: verify every file, then persist the release row and
     its three stored artifacts as ``ingesting``.
 
-    Verification failures raise here and persist **nothing** (they are the
-    common, user-correctable errors — wrong file, bad workbook — so they are
-    reported synchronously to the uploader). This phase is fast (no DPM
-    conversion, no rule ingestion), so it completes well within the request
-    timeout; the slow work is ``finalize_release``. A release in this state is
-    ``ingesting`` and therefore never listed as usable.
+    Supply the DPM as either ``dpm_bytes`` (small callers, tests) or ``dpm_path``
+    (a file already streamed to disk — the memory-safe path the HTTP handler
+    uses for the ~720 MB Access original). Verification failures raise here and
+    persist **nothing** (they are the common, user-correctable errors — wrong
+    file, bad workbook — reported synchronously to the uploader). This phase is
+    fast (no DPM conversion, no rule ingestion), so it completes well within the
+    request timeout; the slow work is ``finalize_release``. A release in this
+    state is ``ingesting`` and therefore never listed as usable.
     """
     settings = settings or get_settings()
     # Local imports keep the stage's public surface clean; both are same-stage.
     from app.taxonomy import artifacts as _artifacts
     from app.taxonomy import rules as _rules
 
+    if (dpm_bytes is None) == (dpm_path is None):
+        raise ValueError("provide exactly one of dpm_bytes or dpm_path")
+
     label = (version_label or "").strip()
     if not label:
         raise ValidationError('A version label is required (for example "4.2").')
 
     # Verify all three up front — persist nothing unless every one is valid.
-    source_form = verify_dpm_file(dpm_bytes, dpm_filename, verifier=dpm_verifier)
+    if dpm_bytes is not None:
+        source_form = verify_dpm_file(dpm_bytes, dpm_filename, verifier=dpm_verifier)
+    else:
+        source_form = verify_dpm_path(dpm_path, dpm_filename, verifier=dpm_verifier)
     _artifacts.verify_taxonomy_package(taxonomy_bytes, taxonomy_filename)
     _rules.verify_workbook_file(rules_bytes, rules_filename)
 
@@ -662,6 +806,7 @@ def begin_release(
     snapshot = register_snapshot(
         db,
         file_bytes=dpm_bytes,
+        source_path=dpm_path,
         filename=dpm_filename,
         version_label=label,
         regulator_id=regulator_id,

@@ -200,12 +200,16 @@ export default function ReleaseWizard() {
             Create
           </button>
           {phase === 'uploading' && (
-            <span className="text-[13px] text-sub">Uploading… {Math.round(progress * 100)}%</span>
+            <span className="text-[13px] text-sub">
+              Uploading the files… {Math.round(progress * 100)}%
+            </span>
           )}
           {phase === 'creating' && (
-            <span className="text-[13px] text-sub">
-              Verifying the files, converting the DPM database, and ingesting the
-              rules… this can take a minute.
+            <span className="inline-flex items-center gap-2 text-[13px] text-sub">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted" />
+              Converting the DPM database and ingesting the rules — this can take
+              several minutes. Keep this tab open; you’ll be taken to the release
+              when it’s ready.
             </span>
           )}
         </div>

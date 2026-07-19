@@ -6,12 +6,16 @@ a background task; clients poll the snapshot detail for status.
 
 from __future__ import annotations
 
+from pathlib import Path
+from uuid import uuid4
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_db
+from app.core.errors import ValidationError
 from app.taxonomy import artifacts, capabilities, coherence, rules, service
 from app.taxonomy.models import ReleaseSlot, TaxonomySnapshot
 from app.taxonomy.schemas import (
@@ -193,20 +197,45 @@ async def create_release(
     in-progress or failed one is never usable, and a background failure leaves no
     residue to block a retry.
     """
-    dpm_bytes = await dpm_file.read()
-    taxonomy_bytes = await taxonomy_file.read()
-    rules_bytes = await rules_file.read()
-    snapshot = service.begin_release(
-        db,
-        regulator_id=regulator_id,
-        version_label=version_label,
-        dpm_bytes=dpm_bytes,
-        dpm_filename=dpm_file.filename or "dpm.accdb",
-        taxonomy_bytes=taxonomy_bytes,
-        taxonomy_filename=taxonomy_file.filename or "taxonomy.zip",
-        rules_bytes=rules_bytes,
-        rules_filename=rules_file.filename or "rules.xlsx",
-    )
+    # Stream the DPM (up to ~720 MB) to disk on the volume in chunks — never
+    # buffer it in a bytes object, which was the out-of-memory cause. The
+    # taxonomy package and rules workbook are small, so they stay in memory.
+    settings = get_settings()
+    tmp_dir = settings.data_dir / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(dpm_file.filename or "").suffix or ".accdb"
+    tmp_path = tmp_dir / f"dpm-upload-{uuid4().hex}{suffix}"
+    try:
+        try:
+            with tmp_path.open("wb") as out:
+                while chunk := await dpm_file.read(8 * 1024 * 1024):
+                    out.write(chunk)
+        except OSError as exc:
+            # Out of space on the volume (the DPM can be ~720 MB). Surface a
+            # plain, actionable reason instead of an opaque 500.
+            raise ValidationError(
+                "The server ran out of storage while receiving the DPM "
+                "database. The release volume needs enlarging — ask an "
+                "administrator to increase it, then try again."
+            ) from exc
+        taxonomy_bytes = await taxonomy_file.read()
+        rules_bytes = await rules_file.read()
+        # begin_release moves tmp_path into the snapshot dir on success; verify
+        # failures raise here (422) having stored nothing.
+        snapshot = service.begin_release(
+            db,
+            regulator_id=regulator_id,
+            version_label=version_label,
+            dpm_path=tmp_path,
+            dpm_filename=dpm_file.filename or "dpm.accdb",
+            taxonomy_bytes=taxonomy_bytes,
+            taxonomy_filename=taxonomy_file.filename or "taxonomy.zip",
+            rules_bytes=rules_bytes,
+            rules_filename=rules_file.filename or "rules.xlsx",
+        )
+    finally:
+        # Remove the temp file unless begin_release already moved it into place.
+        tmp_path.unlink(missing_ok=True)
     background.add_task(service.create_release_task, snapshot.id)
     return _snapshot_out(db, snapshot)
 
