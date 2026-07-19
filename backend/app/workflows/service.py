@@ -1266,9 +1266,18 @@ def execute_run(
 
         # Phase 2 — post-generation structural checks, specific to the output
         # format. The xBRL-CSV package check-set understands the CSV package
-        # layout only; it must not run against a single-file xBRL-XML instance.
-        # The XML structural check-set (docs/xml-notes.md §9) lands in CP4.
-        if output_format is OutputFormat.xbrl_csv:
+        # layout only and must not run against a single-file xBRL-XML instance;
+        # the XML instance gets its own check-set (docs/xml-notes.md §9).
+        if output_format is OutputFormat.xbrl_xml:
+            findings += _safe_validate(
+                "package",
+                lambda: validation.validate_xml_instance(
+                    package_bytes=package.content,
+                    package_filename=package.filename,
+                    filing_indicators=metadata.filing_indicators,
+                ),
+            )
+        else:
             findings += _safe_validate(
                 "package",
                 lambda: validation.validate_package(
