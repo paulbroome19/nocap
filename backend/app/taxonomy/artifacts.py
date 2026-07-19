@@ -21,6 +21,7 @@ Per the dependency rules this imports only ``app.core`` and its own stage.
 from __future__ import annotations
 
 import logging
+import uuid
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -154,6 +155,12 @@ def _storage_dir(settings: Settings, snapshot_id: int, slot: ReleaseSlot) -> Pat
     if slot is ReleaseSlot.taxonomy_package:
         return snapshot_dir(settings, snapshot_id) / "taxonomy"
     return _reference_dir(settings, snapshot_id, slot)
+
+
+def _storage_name(filename: str) -> str:
+    """A system-generated on-disk name — unique per upload and independent of the
+    user's filename, which is kept only as display/audit metadata on the row."""
+    return f"{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
 
 
 # ---------------------------------------------------------------------------
@@ -367,14 +374,15 @@ def store_artifact(
     )
     status = ArtifactStatus.failed if problem else ArtifactStatus.ready
 
-    # Write bytes: taxonomy replaces the whole slot dir (single active package);
-    # reference slots overwrite by filename within their own dir.
+    # One active file per slot: clear the slot dir, then write the new file under
+    # a system-generated name (independent of the user's filename).
     target_dir = _storage_dir(settings, snapshot.id, slot)
-    if slot is ReleaseSlot.taxonomy_package and target_dir.exists():
-        for old in target_dir.glob("*.zip"):
-            old.unlink()
+    if target_dir.exists():
+        for old in target_dir.iterdir():
+            if old.is_file():
+                old.unlink()
     target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / filename
+    path = target_dir / _storage_name(filename)
     path.write_bytes(data)
 
     artifact = db.scalar(
@@ -387,7 +395,7 @@ def store_artifact(
         artifact = ReleaseArtifact(snapshot_id=snapshot.id, slot=slot)
         db.add(artifact)
     artifact.filename = filename
-    artifact.storage_key = str(path.relative_to(settings.data_dir))
+    artifact.storage_key = str(path.relative_to(settings.data_dir).as_posix())
     artifact.checksum = compute_checksum(data)
     artifact.status = status
     artifact.error = problem

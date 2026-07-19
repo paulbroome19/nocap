@@ -79,14 +79,30 @@ def test_upload_taxonomy_slot_feeds_arelle_path(
         db_session, snap, ReleaseSlot.taxonomy_package,
         filename="taxo_4.2.zip", data=_zip_bytes(),
     )
-    # The file lands where formula validation reads per-snapshot taxonomy zips.
+    # The file lands where formula validation reads per-snapshot taxonomy zips
+    # (one active package; the on-disk name is system-generated).
     packages = service.snapshot_taxonomy_packages(get_settings(), snap.id)
-    assert [p.name for p in packages] == ["taxo_4.2.zip"]
+    assert len(packages) == 1
 
     slots = {v.spec.slot: v for v in artifacts.list_slots(db_session, snap)}
     taxo = slots[ReleaseSlot.taxonomy_package]
     assert taxo.status is ArtifactStatus.ready
-    assert taxo.filename == "taxo_4.2.zip"
+    assert taxo.filename == "taxo_4.2.zip"  # user filename kept for display
+
+
+def test_artifact_storage_key_is_system(
+    db_session: Session, mini_dpm: Path
+) -> None:
+    """A release artifact's on-disk key is system-generated, not the filename."""
+    snap = _ready_release(db_session, mini_dpm)
+    art = artifacts.store_artifact(
+        db_session, snap, ReleaseSlot.taxonomy_package,
+        filename="EBA taxonomy 4.2.zip", data=_zip_bytes(),
+    )
+    assert "taxonomy 4.2" not in art.storage_key  # independent of user filename
+    assert " " not in art.storage_key
+    assert art.filename == "EBA taxonomy 4.2.zip"  # kept for display
+    assert (get_settings().data_dir / art.storage_key).exists()
 
 
 def test_upload_replaces_previous_taxonomy_package(
@@ -97,12 +113,13 @@ def test_upload_replaces_previous_taxonomy_package(
         db_session, snap, ReleaseSlot.taxonomy_package,
         filename="old.zip", data=_zip_bytes(),
     )
-    artifacts.store_artifact(
+    art = artifacts.store_artifact(
         db_session, snap, ReleaseSlot.taxonomy_package,
         filename="new.zip", data=_zip_bytes(),
     )
     packages = service.snapshot_taxonomy_packages(get_settings(), snap.id)
-    assert [p.name for p in packages] == ["new.zip"]  # old one removed
+    assert len(packages) == 1  # old one removed, one active package
+    assert art.filename == "new.zip"  # display name is the latest upload
 
 
 def test_backfill_materialises_existing_taxonomy_drop(

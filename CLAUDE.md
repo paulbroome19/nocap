@@ -28,8 +28,13 @@ surface must be checked against PRODUCT.md, not just against these engineering r
 1. **Taxonomies are data, not code.** EBA DPM releases are uploaded through the app and
    stored as immutable, versioned snapshots. There are NO per-taxonomy or per-suite
    folders in the repo. New releases = new database rows, zero code changes.
-2. **Snapshots are sealed.** Once a DPM release is ingested it is never modified.
-   New releases sit alongside old ones. Every run records exactly which snapshot it used.
+2. **Snapshots are versioned; releases are editable and deletable (behaviour: see
+   PRODUCT.md).** New releases sit alongside old ones, and every run records exactly
+   which snapshot it used. Per PRODUCT.md a release's individual artifacts may be
+   replaced (derived state rebuilt) and a release may be deleted regardless of the
+   runs referencing it — history is frozen on the runs, not protected by keeping the
+   release. (The original "sealed / never modified" rule returns, scoped to a
+   *release bound to a signed-off submission*, when sign-off lands — see v2 below.)
 3. **Runs are reproducible.** A run persists its inputs (files as uploaded, byte-for-byte),
    its snapshot reference, its parameters, and its outputs. Any historical run can be
    inspected and its output re-derived.
@@ -199,7 +204,10 @@ EBA formula rules in v1.
 3. Run screen: select snapshot, reference date, entity; upload fact XLSX; upload
    indicators/params file; press Run.
 4. Run detail: status, validation findings table, download package zip, download
-   validation report, full input file list. Runs are never deleted.
+   validation report, full input file list. A run may be deleted from its own page
+   (behaviour: see PRODUCT.md); history is a view over what remains. (The "never
+   deleted" rule returns, scoped to *signed-off* runs, when sign-off lands — a
+   signed-off submission is immutable and can never be deleted; see v2 below.)
 5. Run history per workflow.
 
 ## v2+ (scaffold seams now, do not build)

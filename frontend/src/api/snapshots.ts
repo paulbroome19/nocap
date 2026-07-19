@@ -118,7 +118,8 @@ export async function getSnapshot(id: number): Promise<Snapshot> {
   return res.json()
 }
 
-/** Delete a release (blocked by the server if any run references it). */
+/** Delete a release and everything derived from it. Allowed regardless of any
+ *  runs that reference it — historical runs are frozen and keep their own copies. */
 export async function deleteRelease(id: number): Promise<void> {
   const res = await fetch(`/api/taxonomy/snapshots/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await parseError(res))

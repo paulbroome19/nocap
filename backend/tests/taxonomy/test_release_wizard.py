@@ -1,15 +1,16 @@
-"""All-or-nothing release creation, per-file verification, and deletion guard."""
+"""Transactional release creation (A1), per-file verification, deletion (A2)."""
 
 from __future__ import annotations
 
-import shutil
+import io
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 from sqlalchemy.orm import Session
 
-from app.core.errors import ConflictError, ValidationError
+from app.core.errors import ValidationError
 from app.taxonomy import artifacts, service
 from app.taxonomy.models import (
     ArtifactStatus,
@@ -18,7 +19,14 @@ from app.taxonomy.models import (
     ValidationRule,
 )
 from app.taxonomy.seed import eba
+from tests.fixtures import dpm_mini
 from tests.fixtures import release_files as rf
+from tests.fixtures import validation_rules_mini as vr
+
+
+def _stub_converter(src: Path, out: Path, *, settings, tables=None) -> None:
+    """Stand in for mdbtools: write a valid mini DPM query database."""
+    dpm_mini.build(out)
 
 
 def _create(db: Session, **over):
@@ -31,80 +39,62 @@ def _create(db: Session, **over):
         taxonomy_filename="taxo.zip",
         rules_bytes=rf.rules_bytes(),
         rules_filename="rules.xlsx",
+        converter=_stub_converter,
     )
     kw.update(over)
     return service.create_release(db, **kw)
 
 
-# --- all-or-nothing happy path ---------------------------------------------
+# --- all-or-nothing happy path: a created release is fully ready ------------
 
 
-def test_create_release_persists_all_three(db_session: Session) -> None:
+def test_create_release_is_ready_end_to_end(db_session: Session) -> None:
     snap = _create(db_session)
-    assert snap.status is SnapshotStatus.ingesting
+    # Everything ran synchronously — the release exists only because it succeeded.
+    assert snap.status is SnapshotStatus.ready
 
     slots = {v.spec.slot: v for v in artifacts.list_slots(db_session, snap)}
-    assert slots[ReleaseSlot.dpm_database].status is ArtifactStatus.verifying
+    assert slots[ReleaseSlot.dpm_database].status is ArtifactStatus.ready
     assert slots[ReleaseSlot.taxonomy_package].status is ArtifactStatus.ready
-    assert slots[ReleaseSlot.validation_rules].status is ArtifactStatus.verifying
-
-
-def test_create_release_accepts_pre_converted_sqlite(
-    db_session: Session, tmp_path: Path
-) -> None:
-    """The DPM slot accepts a pre-converted SQLite; provenance records the form."""
-    from app.taxonomy.models import DpmSourceForm
-    from tests.fixtures import dpm_mini
-
-    dpm_sqlite = dpm_mini.build(tmp_path / "dpm.sqlite").read_bytes()
-    snap = _create(
-        db_session, dpm_bytes=dpm_sqlite, dpm_filename="dpm.sqlite"
-    )
-    assert snap.status is SnapshotStatus.ingesting
-    assert snap.dpm_source_form is DpmSourceForm.sqlite
-
-    # Finalises to ready without any mdbtools converter running.
-    def fail(*a, **k):
-        raise AssertionError("converter should not run for the sqlite form")
-
-    service.finalize_release(db_session, snap, converter=fail)
-    assert snap.status is SnapshotStatus.ready
-
-
-def test_create_release_rejects_non_dpm_sqlite(
-    db_session: Session, tmp_path: Path
-) -> None:
-    import sqlite3
-
-    p = tmp_path / "junk.sqlite"
-    conn = sqlite3.connect(p)
-    conn.execute("CREATE TABLE Nope (x INTEGER)")
-    conn.commit()
-    conn.close()
-    with pytest.raises(ValidationError):
-        _create(db_session, dpm_bytes=p.read_bytes(), dpm_filename="junk.sqlite")
-    # Nothing was persisted.
-    assert service.list_snapshots(db_session) == []
-
-
-def test_finalize_makes_release_ready(db_session: Session, mini_dpm: Path) -> None:
-    snap = _create(db_session)
-
-    def stub(src: Path, out: Path, *, settings, tables=None) -> None:
-        shutil.copyfile(mini_dpm, out)
-
-    service.finalize_release(db_session, snap, converter=stub)
-    assert snap.status is SnapshotStatus.ready
-    # The rules workbook was ingested as part of finalisation.
+    assert slots[ReleaseSlot.validation_rules].status is ArtifactStatus.ready
+    # The rules workbook was ingested as part of creation.
     n = (
         db_session.query(ValidationRule)
         .filter_by(snapshot_id=snap.id)
         .count()
     )
     assert n > 0
+    # It appears in the (usable-only) list.
+    assert snap.id in {s.id for s in service.list_snapshots(db_session)}
 
 
-# --- per-file verification: nothing persists on any failure ----------------
+def test_create_release_accepts_pre_converted_sqlite(
+    db_session: Session, tmp_path: Path
+) -> None:
+    """A pre-converted SQLite needs no mdbtools converter; still fully ready."""
+    from app.taxonomy.models import DpmSourceForm
+
+    dpm_sqlite = dpm_mini.build(tmp_path / "dpm.sqlite").read_bytes()
+
+    def fail(*a, **k):
+        raise AssertionError("converter must not run for the sqlite form")
+
+    snap = _create(
+        db_session, dpm_bytes=dpm_sqlite, dpm_filename="dpm.sqlite", converter=fail
+    )
+    assert snap.status is SnapshotStatus.ready
+    assert snap.dpm_source_form is DpmSourceForm.sqlite
+
+
+# --- transactional failure: no release, no residue -------------------------
+
+
+def _assert_nothing_persisted(db_session: Session) -> None:
+    from app.core.config import get_settings
+
+    assert db_session.query(service.TaxonomySnapshot).count() == 0
+    # No stray release directory (id 1 would be the first).
+    assert not service.snapshot_dir(get_settings(), 1).exists()
 
 
 @pytest.mark.parametrize(
@@ -124,12 +114,36 @@ def test_verification_failure_persists_nothing(
 ) -> None:
     with pytest.raises(ValidationError, match=expected):
         _create(db_session, **over)
-    # Airtight: no release row, no on-disk directory.
-    assert service.list_snapshots(db_session) == []
+    _assert_nothing_persisted(db_session)
+
+
+def test_conversion_failure_persists_nothing(db_session: Session) -> None:
+    """A DPM conversion failure (a background stage before) leaves no release."""
+
+    def boom(src, out, *, settings, tables=None):
+        raise RuntimeError("mdbtools blew up")
+
+    with pytest.raises(ValidationError, match="could not be created"):
+        _create(db_session, converter=boom)
+    _assert_nothing_persisted(db_session)
+
+
+def test_rule_ingestion_failure_persists_nothing(db_session: Session) -> None:
+    """Rule ingestion is part of creation: if it fails, no release survives."""
+    # A workbook with a valid header but no data rows passes verification, then
+    # fails ingestion ("no validation rules") — previously left a failed release.
+    wb = Workbook()
+    ws = wb.active
+    ws.append(list(vr.HEADER))
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    with pytest.raises(ValidationError, match="validation-rules workbook"):
+        _create(db_session, rules_bytes=buf.getvalue())
+    _assert_nothing_persisted(db_session)
 
 
 def test_taxonomy_zip_without_package_is_rejected(db_session: Session) -> None:
-    import io
     import zipfile
 
     buf = io.BytesIO()
@@ -137,38 +151,56 @@ def test_taxonomy_zip_without_package_is_rejected(db_session: Session) -> None:
         zf.writestr("readme.txt", "just notes, no taxonomy")
     with pytest.raises(ValidationError, match="taxonomyPackage.xml"):
         _create(db_session, taxonomy_bytes=buf.getvalue())
-    assert service.list_snapshots(db_session) == []
+    _assert_nothing_persisted(db_session)
 
 
-# --- deletion guard ---------------------------------------------------------
+# --- deletion: allowed regardless of runs; removes everything --------------
 
 
-def test_delete_release_with_no_runs(db_session: Session, settings=None) -> None:
+def test_delete_release_removes_everything(db_session: Session) -> None:
     from app.core.config import get_settings
 
     snap = _create(db_session)
     snap_id = snap.id
     assert service.snapshot_dir(get_settings(), snap_id).exists()
 
-    service.delete_release(db_session, snap, run_count=0)
-    assert db_session.get(type(snap), snap_id) is None
+    service.delete_release(db_session, snap)
+    assert db_session.get(service.TaxonomySnapshot, snap_id) is None
     assert not service.snapshot_dir(get_settings(), snap_id).exists()
+    assert (
+        db_session.query(ValidationRule).filter_by(snapshot_id=snap_id).count()
+        == 0
+    )
+    # After deletion the same files upload cleanly (no leftover checksum/dir).
+    again = _create(db_session)
+    assert again.status is SnapshotStatus.ready
 
 
-def test_delete_release_blocked_by_runs(db_session: Session) -> None:
-    snap = _create(db_session)
-    with pytest.raises(ConflictError, match="cannot be deleted"):
-        service.delete_release(db_session, snap, run_count=3)
-    # Still present.
-    assert db_session.get(type(snap), snap.id) is not None
+# --- endpoint: synchronous, all-or-nothing ---------------------------------
 
 
-# --- endpoint: per-file failure → 400 with plain language, nothing listed ---
+def test_endpoint_creates_ready_release(
+    client: TestClient, db_session: Session, tmp_path: Path
+) -> None:
+    # Upload a pre-converted SQLite DPM so the endpoint needs no mdbtools.
+    dpm_sqlite = dpm_mini.build(tmp_path / "dpm.sqlite").read_bytes()
+    resp = client.post(
+        "/api/taxonomy/releases",
+        data={"version_label": "4.2", "regulator_id": eba(db_session).id},
+        files={
+            "dpm_file": ("dpm.sqlite", dpm_sqlite, "application/octet-stream"),
+            "taxonomy_file": ("t.zip", rf.taxonomy_zip_bytes(), "application/zip"),
+            "rules_file": ("r.xlsx", rf.rules_bytes(), "application/octet-stream"),
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["status"] == "ready"
+    sid = resp.json()["id"]
 
-
-@pytest.fixture(autouse=True)
-def _no_background_finalize(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(service, "finalize_release_task", lambda snapshot_id: None)
+    # It is listed (usable), and deletes to 204.
+    assert sid in {s["id"] for s in client.get("/api/taxonomy/snapshots").json()}
+    assert client.delete(f"/api/taxonomy/snapshots/{sid}").status_code == 204
+    assert client.get(f"/api/taxonomy/snapshots/{sid}").status_code == 404
 
 
 def test_endpoint_rejects_bad_dpm(client: TestClient, db_session: Session) -> None:
@@ -181,16 +213,6 @@ def test_endpoint_rejects_bad_dpm(client: TestClient, db_session: Session) -> No
             "rules_file": ("r.xlsx", rf.rules_bytes(), "application/octet-stream"),
         },
     )
-    # ValidationError → 422 with a plain-language reason; nothing was created.
     assert resp.status_code == 422
     assert "EBA DPM" in resp.json()["error"]["message"]
     assert client.get("/api/taxonomy/snapshots").json() == []
-
-
-def test_endpoint_delete_no_runs_returns_204(
-    client: TestClient, db_session: Session
-) -> None:
-    snap = _create(db_session)
-    resp = client.delete(f"/api/taxonomy/snapshots/{snap.id}")
-    assert resp.status_code == 204
-    assert client.get(f"/api/taxonomy/snapshots/{snap.id}").status_code == 404

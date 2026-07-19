@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -180,12 +181,15 @@ def store_workbook(
         )
     verify_workbook_header(data)  # raises on a wrong/unreadable file
 
+    # One active workbook per slot: clear the dir, then write under a
+    # system-generated name (independent of the user's filename).
     target_dir = _rules_dir(settings, snapshot.id)
     if target_dir.exists():
-        for old in target_dir.glob("*.xlsx"):
-            old.unlink()
+        for old in target_dir.iterdir():
+            if old.is_file():
+                old.unlink()
     target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / filename
+    path = target_dir / f"{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
     path.write_bytes(data)
 
     artifact = db.scalar(
@@ -200,7 +204,7 @@ def store_workbook(
         )
         db.add(artifact)
     artifact.filename = filename
-    artifact.storage_key = str(path.relative_to(settings.data_dir))
+    artifact.storage_key = str(path.relative_to(settings.data_dir).as_posix())
     artifact.checksum = compute_checksum(data)
     artifact.status = ArtifactStatus.verifying
     artifact.error = None

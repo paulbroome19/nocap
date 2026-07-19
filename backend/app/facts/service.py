@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import uuid
 from datetime import date
 from pathlib import Path
 
@@ -46,6 +47,16 @@ def _run_dir(settings: Settings, run_id: int) -> Path:
     return settings.data_dir / "runs" / str(run_id)
 
 
+def _storage_name(filename: str) -> str:
+    """A system-generated on-disk name — unique per upload and independent of the
+    user's filename, which is kept only as display/audit metadata on the row.
+
+    Two uploads sharing a name therefore land at distinct paths and coexist; no
+    behaviour, lookup, or path keys off the user-supplied name.
+    """
+    return f"{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
+
+
 def _validate_lei(entity: str) -> str:
     entity = entity.strip()
     if len(entity) != 20 or not entity.isalnum():
@@ -64,10 +75,15 @@ def store_run_file(
     data: bytes,
     settings: Settings,
 ) -> RunFile:
-    """Persist an uploaded file to disk and register a ``RunFile`` row."""
+    """Persist an uploaded file to disk and register a ``RunFile`` row.
+
+    The on-disk name is system-generated (unique per upload); the user's filename
+    is retained on the row for display/audit only. Two uploads of the same name
+    to the same run + role therefore coexist rather than overwrite.
+    """
     directory = _run_dir(settings, run_id) / role.value
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / filename
+    path = directory / _storage_name(filename)
     path.write_bytes(data)
 
     run_file = RunFile(
@@ -103,23 +119,18 @@ def upsert_run_file(
             RunFile.run_id == run_id, RunFile.role == role
         )
     )
-    directory = _run_dir(settings, run_id) / role.value
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / filename
-    path.write_bytes(data)
-    storage_key = str(path.relative_to(settings.data_dir).as_posix())
-
     if existing is None:
         return store_run_file(
             db, run_id=run_id, role=role, filename=filename, data=data,
             settings=settings,
         )
-    # If the filename changed, drop the now-orphaned old file.
-    old_path = settings.data_dir / existing.storage_key
-    if existing.storage_key != storage_key and old_path.exists():
-        old_path.unlink()
+    # Overwrite in place at the existing (system-generated) storage key so the
+    # RunFile id and its path stay stable across rewrites; the display filename
+    # is refreshed as metadata only.
+    path = settings.data_dir / existing.storage_key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
     existing.filename = filename
-    existing.storage_key = storage_key
     existing.checksum = compute_checksum(data)
     db.flush()
     return existing

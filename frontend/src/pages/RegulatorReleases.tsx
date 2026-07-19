@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  deleteRelease,
   getRegulator,
   listRegulatorReleases,
   type Regulator,
@@ -25,8 +24,6 @@ export default function RegulatorReleases() {
   const [regulator, setRegulator] = useState<Regulator | null>(null)
   const [releases, setReleases] = useState<Snapshot[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<number | null>(null)
 
   const load = useCallback(() => {
     listRegulatorReleases(id)
@@ -38,28 +35,6 @@ export default function RegulatorReleases() {
     getRegulator(id).then(setRegulator).catch(() => {})
     load()
   }, [id, load])
-
-  // Poll while any release is still converting.
-  const converting = (releases ?? []).some((r) => r.status === 'ingesting')
-  useEffect(() => {
-    if (!converting) return
-    const t = setInterval(load, 2500)
-    return () => clearInterval(t)
-  }, [converting, load])
-
-  async function handleDelete(r: Snapshot) {
-    if (!window.confirm(`Delete ${r.display_name}? This cannot be undone.`)) return
-    setActionError(null)
-    setBusy(r.id)
-    try {
-      await deleteRelease(r.id)
-      load()
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
 
   return (
     <section>
@@ -77,11 +52,6 @@ export default function RegulatorReleases() {
       />
 
       <ErrorText>{error}</ErrorText>
-      {actionError && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {actionError}
-        </div>
-      )}
 
       {releases === null && !error ? (
         <TableSkeleton rows={4} />
@@ -97,39 +67,25 @@ export default function RegulatorReleases() {
                 <th className="px-4 py-3 font-medium">Taxonomy</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Added</th>
-                <th className="px-4 py-3 text-right font-medium" />
               </tr>
             </thead>
             <tbody>
               {(releases ?? []).map((r) => (
                 <tr
                   key={r.id}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                  className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                  onClick={() => navigate(`/releases/${r.id}`)}
                 >
                   <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/releases/${r.id}`)}
-                      className="font-medium text-slate-900 hover:underline"
-                    >
+                    <span className="font-medium text-slate-900 hover:underline">
                       {r.display_name}
-                    </button>
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-xs tabular-nums text-slate-400">
                     {formatDate(r.uploaded_at)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      disabled={busy === r.id}
-                      onClick={() => void handleDelete(r)}
-                      className="text-xs font-medium text-slate-400 hover:text-red-600 disabled:opacity-50"
-                    >
-                      {busy === r.id ? 'Deleting…' : 'Delete'}
-                    </button>
                   </td>
                 </tr>
               ))}

@@ -6,8 +6,6 @@ a background task; clients poll the snapshot detail for status.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -25,16 +23,6 @@ from app.taxonomy.schemas import (
 )
 
 router = APIRouter()
-
-
-def get_run_counter() -> Callable[[Session, int], int]:
-    """Seam: how many runs reference a release (for the deletion guard).
-
-    Runs live in the workflows stage, which the taxonomy stage must not import.
-    The app composition root overrides this with the workflows implementation;
-    the default (no runs) keeps the stage self-contained and testable.
-    """
-    return lambda db, snapshot_id: 0
 
 
 def _snapshot_out(db: Session, snapshot: TaxonomySnapshot) -> SnapshotOut:
@@ -183,9 +171,8 @@ def download_artifact(
     )
 
 
-@router.post("/releases", response_model=SnapshotOut, status_code=202)
+@router.post("/releases", response_model=SnapshotOut, status_code=201)
 async def create_release(
-    background: BackgroundTasks,
     version_label: str = Form(...),
     regulator_id: int = Form(...),
     dpm_file: UploadFile = File(...),
@@ -195,10 +182,10 @@ async def create_release(
 ) -> SnapshotOut:
     """Create a release from its three mandatory artifacts — all or nothing.
 
-    Every file is verified before anything persists; a single failure creates no
-    release (HTTP 400 with a plain-language reason). Once all three verify, the
-    release is written (``ingesting``) and the slow DPM conversion + rule
-    ingestion finish in the background. Clients poll the release for status.
+    Verification, DPM conversion, and rule ingestion all complete before the
+    release exists; a failure at any stage creates no release and leaves no files
+    (HTTP 422 with a plain-language reason). On success the release is returned
+    ``ready`` — a listed release is always usable.
     """
     snapshot = service.create_release(
         db,
@@ -211,18 +198,15 @@ async def create_release(
         rules_bytes=await rules_file.read(),
         rules_filename=rules_file.filename or "rules.xlsx",
     )
-    background.add_task(service.finalize_release_task, snapshot.id)
     return _snapshot_out(db, snapshot)
 
 
 @router.delete("/snapshots/{snapshot_id}", status_code=204)
-def delete_release(
-    snapshot_id: int,
-    run_counter: Callable[[Session, int], int] = Depends(get_run_counter),
-    db: Session = Depends(get_db),
-) -> None:
-    """Delete a release, unless runs were produced from it (then it explains why)."""
+def delete_release(snapshot_id: int, db: Session = Depends(get_db)) -> None:
+    """Delete a release and everything derived from it.
+
+    Allowed regardless of any runs produced from it — historical runs are frozen
+    and keep their own copies, so deletion never alters them.
+    """
     snapshot = service.get_snapshot(db, snapshot_id)
-    service.delete_release(
-        db, snapshot, run_count=run_counter(db, snapshot_id)
-    )
+    service.delete_release(db, snapshot)
