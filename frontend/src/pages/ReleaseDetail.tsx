@@ -147,13 +147,19 @@ export default function ReleaseDetail() {
       )}
 
       {coherence_warnings.length > 0 && (
-        <Block className="mb-6 p-5">
-          <ul className="space-y-2 text-[13px] text-sub">
+        <div className="mb-6 rounded-[14px] border border-card border-l-2 border-l-red bg-canvas px-5 py-4">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-red" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-red">
+              Version mismatch
+            </span>
+          </div>
+          <ul className="mt-2.5 space-y-1.5 text-[13px] text-data">
             {coherence_warnings.map((w) => (
               <li key={w}>{w}</li>
             ))}
           </ul>
-        </Block>
+        </div>
       )}
 
       <SectionLabel>Artifacts</SectionLabel>
