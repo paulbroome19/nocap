@@ -72,9 +72,8 @@ def test_unchanged_module_collapses_to_one_option(
     assert len(result.options) == 1
     opt = result.options[0]
     assert (opt.module_version, opt.framework_version) == ("3.3.0", "4.2")
-    # All three releases provide it — detail, newest first.
-    assert opt.provided_by == ["EBA Taxonomy 4.2.2", "EBA Taxonomy 4.2.1",
-                               "EBA Taxonomy 4.2"]
+    # The option leads with all the taxonomy versions providing it (oldest first).
+    assert opt.taxonomy_versions == ["4.2", "4.2.1", "4.2.2"]
     # A run binds to the newest release providing it.
     s42, s421, s422 = three_releases
     assert opt.snapshot_id == s422.id
@@ -94,7 +93,9 @@ def test_changed_module_presents_distinct_options(
     assert by_ver["3.4.0"].snapshot_id == s42.id
     assert by_ver["3.4.1"].snapshot_id == s421.id
     assert by_ver["3.4.2"].snapshot_id == s422.id
-    assert by_ver["3.4.0"].provided_by == ["EBA Taxonomy 4.2"]
+    # Each option leads with the single taxonomy version that provides it.
+    assert by_ver["3.4.0"].taxonomy_versions == ["4.2"]
+    assert by_ver["3.4.1"].taxonomy_versions == ["4.2.1"]
 
 
 def test_selector_lists_only_releases_containing_the_module(
@@ -177,6 +178,9 @@ def test_create_run_freezes_module_and_framework_version(
     # mini DPM: COREP_LCR_DA VersionNumber 3.3.0 at release code 4.2.
     assert run.module_version == "3.3.0"
     assert run.framework_version == "4.2"
+    # The taxonomy version = the bound release's label (the run records the
+    # specific release it bound to); the module version is supporting detail.
+    assert run.taxonomy_version == ready_snapshot.version_label
 
 
 def test_version_window_finding(

@@ -77,9 +77,13 @@ def list_module_versions(
 
     options: list[ModuleVersionOption] = []
     for (module_version, framework_version), rms in groups.items():
-        # newest release providing it first (highest snapshot id)
-        rms_sorted = sorted(rms, key=lambda r: r.snapshot_id, reverse=True)
-        newest = rms_sorted[0]
+        # newest release providing it (highest snapshot id) is what a run binds to.
+        newest = max(rms, key=lambda r: r.snapshot_id)
+        # The taxonomy versions (release labels) providing it, oldest first —
+        # e.g. ["4.2", "4.2.1", "4.2.2"]. The option leads with these.
+        taxonomy_versions = sorted(
+            (ready[r.snapshot_id].version_label for r in rms), key=_version_key
+        )
         options.append(
             ModuleVersionOption(
                 module_code=wf.module_code,
@@ -89,12 +93,14 @@ def list_module_versions(
                 snapshot_id=newest.snapshot_id,  # the release a run binds to
                 valid_from=newest.valid_from,
                 valid_to=newest.valid_to,
-                provided_by=[ready[r.snapshot_id].display_name for r in rms_sorted],
+                taxonomy_versions=taxonomy_versions,
             )
         )
 
-    # newest module version first; nothing is preselected (the UI chooses none).
-    options.sort(key=lambda o: _version_key(o.module_version), reverse=True)
+    # Newest taxonomy version first; nothing is preselected (the UI chooses none).
+    options.sort(
+        key=lambda o: _version_key(o.taxonomy_versions[-1]), reverse=True
+    )
     return ModuleVersionOptions(
         workflow_id=workflow_id, module_code=wf.module_code, options=options
     )
