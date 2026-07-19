@@ -609,6 +609,10 @@ def create_run(
         decimals=decimals if decimals is not None else -3,
         status=RunStatus.created,
         capabilities=caps.to_dict(),
+        # The taxonomy version the user selected = the bound release's label. The
+        # run records the specific release it bound to; the module version is the
+        # supporting detail.
+        taxonomy_version=snapshot.version_label,
         module_version=run_module_version,
         framework_version=run_framework_version,
         module_valid_from=run_valid_from,
@@ -1211,12 +1215,14 @@ def build_run_register(db: Session, run: Run, findings: list) -> list:
 
 
 def _rule_scope_statement(run: Run) -> str | None:
-    """Plain-language statement of the rule set applied, e.g.
-    "1,284 rules applicable to COREP_LCR_DA 3.3.0 at 31 Dec 2025"."""
+    """Plain-language statement of the rule set applied, leading with the
+    taxonomy version, e.g. "Taxonomy 4.2.1 — 1,284 rules applicable to
+    COREP_LCR_DA 3.3.0 at 31 Dec 2025"."""
     scope = run.rule_scope
     if not scope:
         return None
     count = scope.get("count", 0)
+    taxonomy = scope.get("taxonomy_version") or run.taxonomy_version or ""
     module = scope.get("module_code") or ""
     version = scope.get("module_version") or ""
     try:
@@ -1224,7 +1230,8 @@ def _rule_scope_statement(run: Run) -> str | None:
     except (KeyError, ValueError):
         when = run.reference_date.strftime("%d %b %Y")
     module_bit = f" to {module} {version}".rstrip() if module else ""
-    return f"{count:,} rules applicable{module_bit} at {when}"
+    lead = f"Taxonomy {taxonomy} — " if taxonomy else ""
+    return f"{lead}{count:,} rules applicable{module_bit} at {when}"
 
 
 def _write_validation_report(
@@ -1746,6 +1753,7 @@ def run_formula_validation_task(run_id: int) -> None:
                 # Freeze the rule set applied, so the report can state it plainly.
                 rule_scope = {
                     "count": view.applicable_count,
+                    "taxonomy_version": run.taxonomy_version,
                     "module_code": module_code,
                     "module_version": run.module_version,
                     "framework_version": framework_version,

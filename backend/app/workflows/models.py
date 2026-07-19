@@ -266,11 +266,13 @@ class Run(Base):
     # reproducibility (capabilities are otherwise derived on read, never stored).
     capabilities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    # The taxonomy version this run was executed against, frozen at creation. The
-    # user selects a module version; these record the exact version that governed
-    # generation and rule scoping, so history is reproducible even after later
-    # releases change what a module provides. Null on runs created before this
-    # feature (the release_id still resolves them live for display).
+    # The taxonomy version this run was executed against, frozen at creation.
+    # The user selects a taxonomy version (the release, e.g. "4.2.1"); the
+    # module version (e.g. "3.3.0") is the supporting detail beneath it. Both are
+    # frozen so history — and its labels — reproduce even after later releases
+    # change what a module provides, or the bound release is deleted. Null on runs
+    # created before this feature.
+    taxonomy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     module_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     framework_version: Mapped[str | None] = mapped_column(
         String(32), nullable=True

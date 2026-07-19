@@ -176,7 +176,9 @@ export interface Run {
   status: RunStatus
   error: string | null
   failure_details: Array<Record<string, unknown>> | null
-  // The taxonomy version this run was executed against, frozen at creation.
+  // The taxonomy version this run was executed against (the bound release),
+  // frozen at creation — the primary version label; module_version is detail.
+  taxonomy_version: string | null
   module_version: string | null
   framework_version: string | null
   // The version's reference-date applicability window, frozen at creation.
@@ -189,6 +191,7 @@ export interface Run {
 
 export interface RuleScope {
   count: number
+  taxonomy_version: string | null
   module_code: string | null
   module_version: string | null
   framework_version: string | null
@@ -334,7 +337,9 @@ export interface ModuleVersionOption {
   snapshot_id: number
   valid_from: string | null
   valid_to: string | null
-  provided_by: string[]
+  // Release version labels providing this option, oldest first (e.g.
+  // ["4.2", "4.2.1"]) — the primary label of the option.
+  taxonomy_versions: string[]
 }
 
 export interface ModuleVersionOptions {

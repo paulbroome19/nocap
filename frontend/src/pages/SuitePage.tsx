@@ -253,22 +253,22 @@ export default function SuitePage() {
                       onChange={(v) => setVersionIdx(v === '' ? '' : Number(v))}
                     >
                       <option value="">Select…</option>
+                      {/* Lead with the taxonomy version(s) — the release labels
+                          the user recognises. Multiple providers show all. */}
                       {versions.map((o, i) => (
                         <option key={`${o.module_version}-${o.framework_version}`} value={i}>
-                          {o.module_version}
+                          {o.taxonomy_versions.join(', ')}
                         </option>
                       ))}
                     </Select>
-                    {/* Supporting detail — available, not shouted. */}
+                    {/* Module version + validity are supporting detail beneath. */}
                     {selectedVersion && (
                       <p className="mt-1.5 text-[12px] leading-snug text-sub">
-                        Framework {selectedVersion.framework_version}
+                        Module version {selectedVersion.module_version}
                         {selectedVersion.valid_from &&
-                          ` · from ${formatDate(selectedVersion.valid_from)}`}
-                        {' · '}
-                        {selectedVersion.provided_by.length === 1
-                          ? `provided by ${selectedVersion.provided_by[0]}`
-                          : `provided by ${selectedVersion.provided_by.length} releases (${selectedVersion.provided_by.join(', ')})`}
+                          ` · applies from ${formatDate(selectedVersion.valid_from)}`}
+                        {selectedVersion.valid_to &&
+                          ` to ${formatDate(selectedVersion.valid_to)}`}
                       </p>
                     )}
                     {windowWarning && (

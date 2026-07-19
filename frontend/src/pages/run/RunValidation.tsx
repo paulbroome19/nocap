@@ -181,6 +181,8 @@ export default function RunValidation() {
 
       {detail.run.rule_scope && (
         <p className="text-[13px] text-sub">
+          {detail.run.rule_scope.taxonomy_version &&
+            `Taxonomy ${detail.run.rule_scope.taxonomy_version} — `}
           {detail.run.rule_scope.count.toLocaleString()} rules applicable
           {detail.run.rule_scope.module_code &&
             ` to ${detail.run.rule_scope.module_code} ${detail.run.rule_scope.module_version ?? ''}`.trimEnd()}

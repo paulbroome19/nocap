@@ -174,7 +174,9 @@ class RunOut(BaseModel):
     failure_details: list | None
     # The release capability set captured when the run was created.
     capabilities: dict | None
-    # The taxonomy version the run was executed against, frozen at creation.
+    # The taxonomy version the run was executed against (the bound release),
+    # frozen at creation — the primary version label; module_version is detail.
+    taxonomy_version: str | None
     module_version: str | None
     framework_version: str | None
     # The version's reference-date applicability window, frozen at creation.
@@ -257,10 +259,12 @@ class ModuleVersionOption(BaseModel):
     """One selectable taxonomy version for a module — a distinct
     ``(module_version, framework_version)`` across every ready release.
 
-    The dropdown shows ``module_version`` alone; the rest is supporting detail
-    (which releases provide it, its reference-date window, the framework
-    version). ``snapshot_id`` is the release a run binds to when this option is
-    chosen (the newest release providing the version) — detail, not a choice."""
+    The dropdown **leads with the taxonomy version(s)** — the release labels
+    providing this option (``taxonomy_versions``, e.g. "4.2, 4.2.1") — with the
+    ``module_version`` (e.g. "3.3.0") as supporting detail. Dedup is still by
+    ``(module_version, framework_version)``; the label just leads with what the
+    user recognises. ``snapshot_id`` is the release a run binds to (the newest
+    providing it) — the run records that specific release."""
 
     module_code: str
     module_name: str | None
@@ -269,7 +273,9 @@ class ModuleVersionOption(BaseModel):
     snapshot_id: int
     valid_from: date | None
     valid_to: date | None
-    provided_by: list[str]  # release display names, newest first
+    # Release version labels providing this option, oldest first (e.g.
+    # ["4.2", "4.2.1", "4.2.2"]) — the primary label of the option.
+    taxonomy_versions: list[str]
 
 
 class ModuleVersionOptions(BaseModel):

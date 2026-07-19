@@ -194,17 +194,18 @@ export default function RunCover() {
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           <IdField label="Entity" value={entityName} />
           <IdField label="Reporting date" value={formatDate(run.reference_date)} mono />
-          <IdField
-            label="Taxonomy release"
-            value={releaseMissing ? '—' : (release?.version_label ?? '')}
-          />
-          {/* The taxonomy version the run was executed against — frozen on the
-              run, so it reads correctly even if the release is later deleted. */}
+          {/* Lead with the taxonomy version — the release the run bound to,
+              frozen on the run so it reads correctly even if the release is
+              later deleted. The module version is the supporting detail. */}
           <IdField
             label="Taxonomy version"
-            value={run.module_version ?? '—'}
+            value={
+              run.taxonomy_version ??
+              (releaseMissing ? '—' : (release?.version_label ?? '—'))
+            }
             mono
           />
+          <IdField label="Module version" value={run.module_version ?? '—'} mono />
           <IdField label="Snapshot" value={run.snapshot_key ?? ''} mono />
           <IdField label="Adjusted" value={run.adjusted_key ?? ''} mono />
           <IdField label="Version" value={run.version_key ?? ''} mono />
