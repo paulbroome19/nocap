@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   attachFactFile,
+  deleteRun,
   DependencyChangedError,
   executeRun,
   reexecuteRun,
@@ -87,6 +88,24 @@ export default function RunCover() {
   const filed = fis.filter((f) => f.reported).length
   const notFiled = fis.length - filed
   const pkg = detail.files.find((f) => f.role === 'package_output')
+
+  async function handleDelete() {
+    const message =
+      `Delete this execution (#${run.id})?\n\n` +
+      'This removes the run and its artifacts — the generated package, the ' +
+      'validation report, the input file, and the recorded facts. Other ' +
+      'executions of this instance are unaffected. This cannot be undone.'
+    if (!window.confirm(message)) return
+    setBusy('Deleting…')
+    setError(null)
+    try {
+      await deleteRun(run.id)
+      navigate(`/reporting/suites/${run.workflow_id}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(null)
+    }
+  }
 
   async function runResubmit(acknowledge: boolean) {
     if (!file) return
@@ -314,6 +333,18 @@ export default function RunCover() {
           </div>
         )}
       </Card>
+
+      {/* Delete this execution */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          disabled={busy !== null}
+          className="text-xs font-medium text-slate-400 hover:text-red-600 disabled:opacity-50"
+          onClick={() => void handleDelete()}
+        >
+          Delete this execution
+        </button>
+      </div>
     </section>
   )
 }

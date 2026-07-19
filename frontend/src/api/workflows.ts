@@ -274,6 +274,12 @@ export const createEntity = (body: EntityWrite) =>
 export const updateEntity = (id: number, body: EntityWrite) =>
   sendJSON<Entity>('PUT', `/api/workflows/entities/${id}`, body)
 
+/** Delete an entity (live reference data). Runs keep their frozen values. */
+export async function deleteEntity(id: number): Promise<void> {
+  const res = await fetch(`/api/workflows/entities/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
 export const getEntityWorkflowConfig = (entityId: number, workflowId: number) =>
   getJSON<EntityWorkflowConfig>(
     `/api/workflows/entities/${entityId}/configs/${workflowId}`,
@@ -362,6 +368,12 @@ export async function reexecuteRun(
   }
   if (!res.ok) throw new Error(await parseError(res))
   return res.json()
+}
+
+/** Delete an execution and its artifacts. Other executions are untouched. */
+export async function deleteRun(runId: number): Promise<void> {
+  const res = await fetch(`/api/workflows/runs/${runId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await parseError(res))
 }
 
 export const attachFactFile = (runId: number, file: File) =>

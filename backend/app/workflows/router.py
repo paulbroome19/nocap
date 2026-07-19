@@ -155,6 +155,12 @@ def update_entity(
     return EntityOut.model_validate(entity)
 
 
+@router.delete("/entities/{entity_id}", status_code=204)
+def delete_entity(entity_id: int, db: Session = Depends(get_db)) -> None:
+    """Delete an entity (live reference data). Runs keep their frozen values."""
+    service.delete_entity(db, entity_id)
+
+
 @router.get(
     "/entities/{entity_id}/configs/{workflow_id}",
     response_model=EntityWorkflowConfigOut,
@@ -326,6 +332,12 @@ def reexecute_run(
     acknowledge = body.acknowledge_changes if body is not None else False
     run = service.reexecute_run(db, run_id, acknowledge_changes=acknowledge)
     return RunOut.model_validate(run)
+
+
+@router.delete("/runs/{run_id}", status_code=204)
+def delete_run(run_id: int, db: Session = Depends(get_db)) -> None:
+    """Delete an execution and its artifacts. Other executions are untouched."""
+    service.delete_run(db, run_id, settings=get_settings())
 
 
 @router.get("/runs/{run_id}", response_model=RunDetailOut)
