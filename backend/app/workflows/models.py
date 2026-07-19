@@ -29,6 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
+from app.generation.schemas import OutputFormat
 
 
 class RunStatus(enum.StrEnum):
@@ -142,6 +143,58 @@ class EntityWorkflowConfig(Base):
     )
 
 
+class RegulatorFormatDefault(Base):
+    """The default output format for a regulator's submissions.
+
+    One row per regulator. Absent ⇒ the built-in default (xBRL-CSV). A
+    per-(regulator, workflow) row in ``WorkflowFormatConfig`` overrides this for
+    a specific suite; see ``service.resolve_output_format``.
+    """
+
+    __tablename__ = "regulator_format_default"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    regulator_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("regulator.id"), unique=True
+    )
+    output_format: Mapped[OutputFormat] = mapped_column(
+        Enum(OutputFormat, name="output_format")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class WorkflowFormatConfig(Base):
+    """Per-(regulator, workflow) output-format override.
+
+    Present ⇒ this suite generates in ``output_format`` regardless of the
+    regulator default. Absent ⇒ the regulator default applies. Keyed on
+    (regulator, workflow) so the same suite can differ by regulator.
+    """
+
+    __tablename__ = "workflow_format_config"
+    __table_args__ = (
+        UniqueConstraint(
+            "regulator_id", "workflow_id", name="uq_workflow_format_config"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    regulator_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("regulator.id"), index=True
+    )
+    workflow_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workflow_config.id"), index=True
+    )
+    output_format: Mapped[OutputFormat] = mapped_column(
+        Enum(OutputFormat, name="output_format")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Run(Base):
     __tablename__ = "run"
 
@@ -174,6 +227,13 @@ class Run(Base):
     # Package parameters (derived defaults; overridable per run).
     base_currency: Mapped[str] = mapped_column(String(3), default="EUR")
     decimals: Mapped[int] = mapped_column(Integer, default=-3)
+
+    # The output format the package was actually generated in, resolved from the
+    # (regulator, workflow) configuration at execution time and recorded for
+    # reproducibility. Null until the run generates a package.
+    output_format: Mapped[OutputFormat | None] = mapped_column(
+        Enum(OutputFormat, name="output_format"), nullable=True
+    )
 
     status: Mapped[RunStatus] = mapped_column(
         Enum(RunStatus, name="run_status"), default=RunStatus.created

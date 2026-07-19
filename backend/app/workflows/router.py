@@ -24,7 +24,9 @@ from app.workflows.schemas import (
     EntityWorkflowConfigWrite,
     EntityWrite,
     FactRowOut,
+    OutputFormatWrite,
     RegisterRowOut,
+    RegulatorFormatOut,
     RunCreate,
     RunDetailOut,
     RunOut,
@@ -32,6 +34,7 @@ from app.workflows.schemas import (
     SuiteSummaryOut,
     VerdictOut,
     WorkflowConfigOut,
+    WorkflowFormatOut,
     WorkflowSettingsUpdate,
 )
 
@@ -191,6 +194,92 @@ def update_entity_workflow_config(
         decimals=body.decimals,
     )
     return EntityWorkflowConfigOut.model_validate(config)
+
+
+# --- output-format configuration -------------------------------------------
+
+
+@router.get(
+    "/regulators/{regulator_id}/format", response_model=RegulatorFormatOut
+)
+def get_regulator_format(
+    regulator_id: int, db: Session = Depends(get_db)
+) -> RegulatorFormatOut:
+    fmt = service.regulator_format(db, regulator_id)
+    return RegulatorFormatOut(regulator_id=regulator_id, output_format=fmt)
+
+
+@router.put(
+    "/regulators/{regulator_id}/format", response_model=RegulatorFormatOut
+)
+def set_regulator_format(
+    regulator_id: int,
+    body: OutputFormatWrite,
+    db: Session = Depends(get_db),
+) -> RegulatorFormatOut:
+    fmt = service.set_regulator_format_default(
+        db, regulator_id=regulator_id, output_format=body.output_format
+    )
+    return RegulatorFormatOut(regulator_id=regulator_id, output_format=fmt)
+
+
+def _workflow_format_out(
+    regulator_id: int, workflow_id: int, db: Session
+) -> WorkflowFormatOut:
+    effective, overridden, default = service.workflow_format(
+        db, regulator_id, workflow_id
+    )
+    return WorkflowFormatOut(
+        regulator_id=regulator_id,
+        workflow_id=workflow_id,
+        output_format=effective,
+        overridden=overridden,
+        regulator_default=default,
+    )
+
+
+@router.get(
+    "/regulators/{regulator_id}/configs/{workflow_id}/format",
+    response_model=WorkflowFormatOut,
+)
+def get_workflow_format(
+    regulator_id: int, workflow_id: int, db: Session = Depends(get_db)
+) -> WorkflowFormatOut:
+    return _workflow_format_out(regulator_id, workflow_id, db)
+
+
+@router.put(
+    "/regulators/{regulator_id}/configs/{workflow_id}/format",
+    response_model=WorkflowFormatOut,
+)
+def set_workflow_format(
+    regulator_id: int,
+    workflow_id: int,
+    body: OutputFormatWrite,
+    db: Session = Depends(get_db),
+) -> WorkflowFormatOut:
+    service.set_workflow_format_override(
+        db,
+        regulator_id=regulator_id,
+        workflow_id=workflow_id,
+        output_format=body.output_format,
+    )
+    return _workflow_format_out(regulator_id, workflow_id, db)
+
+
+@router.delete(
+    "/regulators/{regulator_id}/configs/{workflow_id}/format",
+    response_model=WorkflowFormatOut,
+)
+def clear_workflow_format(
+    regulator_id: int, workflow_id: int, db: Session = Depends(get_db)
+) -> WorkflowFormatOut:
+    """Remove the per-workflow override so the regulator default applies."""
+    service.workflow_format(db, regulator_id, workflow_id)  # 404 checks
+    service.clear_workflow_format_override(
+        db, regulator_id=regulator_id, workflow_id=workflow_id
+    )
+    return _workflow_format_out(regulator_id, workflow_id, db)
 
 
 @router.get("/configs/{workflow_id}/runs", response_model=list[RunOut])

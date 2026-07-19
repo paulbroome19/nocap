@@ -36,9 +36,11 @@ from app.facts.schemas import (
     IndicatorsParamsIngestSummary,
 )
 from app.generation import service as generation
+from app.generation import xml_builder as generation_xml
 from app.generation.schemas import (
     FactInput,
     FilingIndicatorSpec,
+    OutputFormat,
     PackageMetadata,
 )
 from app.taxonomy import artifacts as taxonomy_artifacts
@@ -68,9 +70,11 @@ from app.workflows.models import (
     WORKFLOW_CATEGORIES,
     Entity,
     EntityWorkflowConfig,
+    RegulatorFormatDefault,
     Run,
     RunStatus,
     WorkflowConfig,
+    WorkflowFormatConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -299,6 +303,131 @@ def upsert_entity_workflow_config(
     db.commit()
     db.refresh(config)
     return config
+
+
+# ---------------------------------------------------------------------------
+# Output-format configuration (per regulator, per (regulator, workflow))
+# ---------------------------------------------------------------------------
+
+# The format used when no configuration says otherwise (EBA convention).
+DEFAULT_OUTPUT_FORMAT = OutputFormat.xbrl_csv
+
+
+def get_regulator_format_default(
+    db: Session, regulator_id: int
+) -> OutputFormat:
+    """A regulator's configured default format, or the built-in default."""
+    row = db.scalar(
+        select(RegulatorFormatDefault).where(
+            RegulatorFormatDefault.regulator_id == regulator_id
+        )
+    )
+    return row.output_format if row is not None else DEFAULT_OUTPUT_FORMAT
+
+
+def set_regulator_format_default(
+    db: Session, *, regulator_id: int, output_format: OutputFormat
+) -> OutputFormat:
+    """Set (upsert) a regulator's default output format."""
+    taxonomy.get_regulator(db, regulator_id)  # 404 if unknown
+    row = db.scalar(
+        select(RegulatorFormatDefault).where(
+            RegulatorFormatDefault.regulator_id == regulator_id
+        )
+    )
+    if row is None:
+        row = RegulatorFormatDefault(regulator_id=regulator_id)
+        db.add(row)
+    row.output_format = output_format
+    db.commit()
+    return output_format
+
+
+def get_workflow_format_override(
+    db: Session, regulator_id: int, workflow_id: int
+) -> OutputFormat | None:
+    """The per-(regulator, workflow) override format, if one is set."""
+    row = db.scalar(
+        select(WorkflowFormatConfig).where(
+            WorkflowFormatConfig.regulator_id == regulator_id,
+            WorkflowFormatConfig.workflow_id == workflow_id,
+        )
+    )
+    return row.output_format if row is not None else None
+
+
+def set_workflow_format_override(
+    db: Session,
+    *,
+    regulator_id: int,
+    workflow_id: int,
+    output_format: OutputFormat,
+) -> WorkflowFormatConfig:
+    """Set (upsert) a per-(regulator, workflow) output-format override."""
+    taxonomy.get_regulator(db, regulator_id)  # 404 if unknown
+    get_workflow(db, workflow_id)  # 404 if unknown
+    row = db.scalar(
+        select(WorkflowFormatConfig).where(
+            WorkflowFormatConfig.regulator_id == regulator_id,
+            WorkflowFormatConfig.workflow_id == workflow_id,
+        )
+    )
+    if row is None:
+        row = WorkflowFormatConfig(
+            regulator_id=regulator_id, workflow_id=workflow_id
+        )
+        db.add(row)
+    row.output_format = output_format
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def clear_workflow_format_override(
+    db: Session, *, regulator_id: int, workflow_id: int
+) -> None:
+    """Remove a per-(regulator, workflow) override so the default applies."""
+    row = db.scalar(
+        select(WorkflowFormatConfig).where(
+            WorkflowFormatConfig.regulator_id == regulator_id,
+            WorkflowFormatConfig.workflow_id == workflow_id,
+        )
+    )
+    if row is not None:
+        db.delete(row)
+        db.commit()
+
+
+def resolve_output_format(
+    db: Session, *, regulator_id: int, workflow_id: int
+) -> OutputFormat:
+    """The effective output format for a (regulator, workflow): override wins,
+    else the regulator default, else the built-in default."""
+    override = get_workflow_format_override(db, regulator_id, workflow_id)
+    if override is not None:
+        return override
+    return get_regulator_format_default(db, regulator_id)
+
+
+def regulator_format(db: Session, regulator_id: int) -> OutputFormat:
+    """A regulator's default format (404 if the regulator is unknown)."""
+    taxonomy.get_regulator(db, regulator_id)
+    return get_regulator_format_default(db, regulator_id)
+
+
+def workflow_format(
+    db: Session, regulator_id: int, workflow_id: int
+) -> tuple[OutputFormat, bool, OutputFormat]:
+    """A (regulator, workflow)'s (effective format, overridden?, default).
+
+    404 if either the regulator or the workflow is unknown.
+    """
+    taxonomy.get_regulator(db, regulator_id)
+    get_workflow(db, workflow_id)
+    default = get_regulator_format_default(db, regulator_id)
+    override = get_workflow_format_override(db, regulator_id, workflow_id)
+    effective = override if override is not None else default
+    return effective, override is not None, default
 
 
 def list_module_templates(
@@ -919,6 +1048,39 @@ def run_verdict(run: Run, findings: list, formula_summary: dict | None) -> dict:
     }
 
 
+class _XmlResolution:
+    """Adapts a taxonomy ``DatapointResolution`` + ``XmlSignature`` to the
+    ``XmlResolver`` contract the xBRL-XML builder expects (metric + members +
+    datatype code). Purely a shape adapter — no logic."""
+
+    __slots__ = ("metric", "members", "datatype_code")
+
+    def __init__(self, sig, datatype_code: str) -> None:
+        self.metric = sig.metric
+        self.members = sig.members
+        self.datatype_code = datatype_code
+
+
+def _make_xml_resolver(lk, resolve, release_id: int):
+    """An ``XmlResolver`` combining the (template,row,col) datatype resolve with
+    the datapoint's xBRL-XML signature (metric + scenario). Returns ``None`` for
+    a fact whose datapoint has no XML signature (e.g. a typed/open-table key),
+    so the builder treats it exactly like an unresolved fact."""
+
+    def _xml_resolve(t, r, c):
+        res = resolve(t, r, c)
+        if res is None or res.property_id is None:
+            return None
+        sig = lk.xml_signature(
+            res.property_id, res.context_id, release_id=release_id
+        )
+        if sig is None:
+            return None
+        return _XmlResolution(sig, res.datatype_code)
+
+    return _xml_resolve
+
+
 def execute_run(
     db: Session, run_id: int, *, settings: Settings | None = None
 ) -> Run:
@@ -1082,19 +1244,39 @@ def execute_run(
                 for f in active_facts
                 if f.template_code not in open_templates
             ]
-            package = generation.build_package(
-                generatable, metadata, resolve=resolve, strict=False
+            # Dispatch on the (regulator, workflow) output format. Both builders
+            # take the same facts + metadata; only the serialisation differs.
+            output_format = resolve_output_format(
+                db,
+                regulator_id=snapshot.regulator_id,
+                workflow_id=run.workflow_id,
             )
+            run.output_format = output_format
+            if output_format is OutputFormat.xbrl_xml:
+                package = generation_xml.build_xml_instance(
+                    generatable,
+                    metadata,
+                    resolve=_make_xml_resolver(lk, resolve, run.release_id),
+                    strict=False,
+                )
+            else:
+                package = generation.build_package(
+                    generatable, metadata, resolve=resolve, strict=False
+                )
 
-        # Phase 2 — post-generation checks on the built package.
-        findings += _safe_validate(
-            "package",
-            lambda: validation.validate_package(
-                package_bytes=package.content,
-                package_filename=package.filename,
-                datatypes_present=datatypes_present,
-            ),
-        )
+        # Phase 2 — post-generation structural checks, specific to the output
+        # format. The xBRL-CSV package check-set understands the CSV package
+        # layout only; it must not run against a single-file xBRL-XML instance.
+        # The XML structural check-set (docs/xml-notes.md §9) lands in CP4.
+        if output_format is OutputFormat.xbrl_csv:
+            findings += _safe_validate(
+                "package",
+                lambda: validation.validate_package(
+                    package_bytes=package.content,
+                    package_filename=package.filename,
+                    datatypes_present=datatypes_present,
+                ),
+            )
 
         def _store(session, rid, filename, data, role=RunFileRole.package_output):
             return facts.store_run_file(
