@@ -56,15 +56,21 @@ export default function ReleaseWizard() {
   const [phase, setPhase] = useState<'idle' | 'uploading' | 'creating'>('idle')
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  // Set when the component unmounts, so an in-flight poll stops touching state.
+  // True only once the component has really unmounted, so an in-flight poll
+  // stops touching state. Reset on (re)mount: React Strict Mode runs effects
+  // setup→cleanup→setup in dev, so without the reset the cleanup would leave
+  // this stuck `true` and the poll loop would never run.
   const cancelled = useRef(false)
 
   useEffect(() => {
     getRegulator(id).then(setRegulator).catch(() => {})
   }, [id])
 
-  useEffect(() => () => {
-    cancelled.current = true
+  useEffect(() => {
+    cancelled.current = false
+    return () => {
+      cancelled.current = true
+    }
   }, [])
 
   const ready =
