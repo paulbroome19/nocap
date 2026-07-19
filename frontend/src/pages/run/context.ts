@@ -16,6 +16,10 @@ export interface RunCtx {
   config: WorkflowConfig | null
   entity: Entity | null
   release: Snapshot | null
+  // The live entity/release referenced by this run no longer exists (deleted).
+  // The run still renders its frozen values; a re-execution asks for a current one.
+  entityMissing: boolean
+  releaseMissing: boolean
   facts: FactRow[] | null
   siblings: Run[] // executions of the same instance, newest first
   regulatorCode: string // the publisher level in the reporting breadcrumb

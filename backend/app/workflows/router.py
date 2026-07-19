@@ -326,11 +326,18 @@ def reexecute_run(
     Returns a new run in ``created`` status carrying the source run's instance
     identity; the caller attaches a fact file and executes it. If the entity or
     release has changed since the last execution, responds 409
-    ``dependency_changed`` with the list of changes; the client confirms and
-    retries with ``acknowledge_changes: true``.
+    ``dependency_changed`` with the list of changes; the client retries with a
+    replacement (``entity_id`` / ``release_snapshot_id``) or, for a still-usable
+    change, ``acknowledge_changes: true``.
     """
-    acknowledge = body.acknowledge_changes if body is not None else False
-    run = service.reexecute_run(db, run_id, acknowledge_changes=acknowledge)
+    body = body or ReexecuteRequest()
+    run = service.reexecute_run(
+        db,
+        run_id,
+        entity_id=body.entity_id,
+        release_snapshot_id=body.release_snapshot_id,
+        acknowledge_changes=body.acknowledge_changes,
+    )
     return RunOut.model_validate(run)
 
 
