@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { createEntity, listEntities, type Entity } from '../api/workflows'
 import EntityForm from '../components/EntityForm'
 import {
-  Card,
+  Block,
   EmptyState,
   ErrorText,
   PageHeader,
+  SectionLabel,
   TableSkeleton,
   primaryBtn,
 } from '../components/ui'
@@ -30,79 +31,63 @@ export default function EntitySetup() {
   return (
     <section>
       <PageHeader
-        crumbs={[
-          { label: 'Reference Data', to: '/reference' },
-          { label: 'Entity Setup' },
-        ]}
+        crumbs={[{ label: 'Reference Data', to: '/reference' }, { label: 'Entity Setup' }]}
         title="Entity Setup"
         actions={
-          <button
-            type="button"
-            className={primaryBtn}
-            onClick={() => setShowNew((v) => !v)}
-          >
-            {showNew ? 'Cancel' : '+ New entity'}
-          </button>
+          !showNew && (
+            <button type="button" className={primaryBtn} onClick={() => setShowNew(true)}>
+              New entity
+            </button>
+          )
         }
       />
 
       {showNew && (
-        <Card className="mb-6 p-5">
-          <h2 className="mb-4 text-sm font-semibold text-slate-900">New entity</h2>
-          <EntityForm
-            submitLabel="Create entity"
-            onCancel={() => setShowNew(false)}
-            onSubmit={async (body) => {
-              const created = await createEntity(body)
-              setShowNew(false)
-              navigate(`/reference/entities/${created.id}`)
-            }}
-          />
-        </Card>
+        <div className="mb-10">
+          <SectionLabel>New entity</SectionLabel>
+          <Block className="p-6">
+            <EntityForm
+              submitLabel="Create entity"
+              onCancel={() => setShowNew(false)}
+              onSubmit={async (body) => {
+                const created = await createEntity(body)
+                setShowNew(false)
+                navigate(`/reference/entities/${created.id}`)
+              }}
+            />
+          </Block>
+        </div>
       )}
 
       <ErrorText>{error}</ErrorText>
 
+      <SectionLabel>Entity</SectionLabel>
       {entities === null && !error ? (
         <TableSkeleton />
       ) : entities && entities.length === 0 ? (
-        <EmptyState>
-          No entities yet. Use <span className="font-medium">+ New entity</span>{' '}
-          to add one.
-        </EmptyState>
+        <EmptyState>No entities yet. Use “New entity” to add one.</EmptyState>
       ) : (
-        <Card className="overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">LEI</th>
-                <th className="px-4 py-3 font-medium">Country</th>
-                <th className="px-4 py-3 font-medium">Scope</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {(entities ?? []).map((e) => (
-                <tr
-                  key={e.id}
-                  onClick={() => navigate(`/reference/entities/${e.id}`)}
-                  className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                    {e.name}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                    {e.lei}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{e.country}</td>
-                  <td className="px-4 py-3 text-slate-600">{e.default_scope}</td>
-                  <td className="px-4 py-3 text-right text-slate-300">→</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+        <Block>
+          {(entities ?? []).map((e) => (
+            <Link
+              key={e.id}
+              to={`/reference/entities/${e.id}`}
+              className="flex items-center justify-between gap-4 border-t border-divider px-6 py-[22px] transition-colors first:border-t-0 hover:bg-hover"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-semibold text-ink">{e.name}</div>
+                <div className="mt-1 font-mono text-[12px] text-muted">
+                  {e.lei}
+                  <span className="mx-1.5 text-faint">·</span>
+                  {e.country}
+                  <span className="mx-1.5 text-faint">·</span>
+                  {e.default_scope}
+                </div>
+              </div>
+              <span className="text-[18px] leading-none text-faint">→</span>
+            </Link>
+          ))}
+        </Block>
       )}
     </section>
   )

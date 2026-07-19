@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { listRegulators, type Regulator } from '../api/snapshots'
-import { Card, ErrorText, PageHeader, RowLink, TableSkeleton } from '../components/ui'
+import {
+  Block,
+  ErrorText,
+  PageHeader,
+  RowLink,
+  SectionLabel,
+  TableSkeleton,
+} from '../components/ui'
 
 export default function SettingsReporting() {
   const [regulators, setRegulators] = useState<Regulator[] | null>(null)
@@ -18,13 +25,13 @@ export default function SettingsReporting() {
         crumbs={[{ label: 'Settings', to: '/settings' }, { label: 'Reporting' }]}
         title="Reporting"
       />
-
       <ErrorText>{error}</ErrorText>
 
+      <SectionLabel>Regulator</SectionLabel>
       {regulators === null && !error ? (
         <TableSkeleton rows={2} />
       ) : (
-        <Card className="divide-y divide-slate-100">
+        <Block>
           {(regulators ?? []).map((r) => (
             <RowLink
               key={r.id}
@@ -33,7 +40,7 @@ export default function SettingsReporting() {
               subtitle={r.code}
             />
           ))}
-        </Card>
+        </Block>
       )}
     </section>
   )
