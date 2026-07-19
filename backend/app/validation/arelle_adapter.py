@@ -293,6 +293,48 @@ def expand_taxonomy_packages(
     return out
 
 
+def taxonomy_load_errors(
+    package_path: Path,
+    taxonomy_packages: list[Path],
+    *,
+    cache_dir: Path,
+) -> list[dict]:
+    """Load a report package's DTS in Arelle (no formula run) and return any
+    load-failure records — an unresolvable taxonomy entry point
+    (``xbrlce:unresolvableBaseMetadataFile``), an invalid taxonomy, an IO error.
+
+    This is the empirical coherence gate for release creation: if the taxonomy
+    package cannot resolve the DPM's current-release entry point, the mismatch
+    surfaces here (fast, DTS-load only) instead of downstream in a real run. An
+    empty list means the package loaded cleanly for that entry point.
+    """
+    from arelle import CntlrCmdLine  # lazy: optional dependency
+
+    packages = expand_taxonomy_packages(taxonomy_packages, cache_dir)
+    # Load + validate the DTS, but do NOT run formula assertions — we only need
+    # to know whether the entry point resolves, which is much cheaper.
+    args = [
+        "--file", str(package_path),
+        "--reportPackage",
+        "--validate",
+        "--internetConnectivity", "offline",
+        "--logFile", "logToBuffer",
+    ]
+    for pkg in [*packages, eurofiling_package(cache_dir)]:
+        args += ["--packages", str(pkg)]
+    cntlr = CntlrCmdLine.parseAndRun(args)
+    try:
+        data = json.loads(cntlr.logHandler.getJson())
+        records = data.get("log", [])
+    finally:
+        cntlr.close()
+    return [
+        r
+        for r in records
+        if r.get("level") == "error" and r.get("code") in _LOAD_ERROR_CODES
+    ]
+
+
 class FormulaValidator(Protocol):
     """Interface so the runtime can swap Arelle for a stub / null implementation."""
 

@@ -22,6 +22,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy import delete, func, select
@@ -829,6 +830,20 @@ def begin_release(
     return snapshot
 
 
+# Composition seam: the final creation gate loads the taxonomy package in Arelle
+# for the DPM's current-release entry point (see workflows.release_gate). That
+# needs the generation + validation stages, which this stage must not import, so
+# app.main injects the verifier at startup. ``None`` (tests, unwired) skips it.
+_ReleaseLoadVerifier = Callable[[int, Settings], None]
+_release_load_verifier: _ReleaseLoadVerifier | None = None
+
+
+def set_release_load_verifier(fn: _ReleaseLoadVerifier | None) -> None:
+    """Inject the empirical coherence gate run at the end of ``finalize_release``."""
+    global _release_load_verifier
+    _release_load_verifier = fn
+
+
 def finalize_release(
     db: Session,
     snapshot: TaxonomySnapshot,
@@ -836,8 +851,9 @@ def finalize_release(
     settings: Settings | None = None,
     converter=convert_accdb_to_sqlite,
 ) -> None:
-    """Phase 2 of creation: the slow work — convert the DPM and ingest the rules
-    — then flip the release to ``ready``.
+    """Phase 2 of creation: the slow work — convert the DPM, ingest the rules,
+    and prove the taxonomy package loads for the DPM's current-release entry
+    point — then flip the release to ``ready``.
 
     Any failure purges the release **entirely** (row, child rows, on-disk files)
     and re-raises a plain-language reason. This is what makes creation genuinely
@@ -862,6 +878,10 @@ def finalize_release(
                 "the validation-rules workbook could not be ingested: "
                 f"{rules_art.error}"
             )
+        # The gate: the taxonomy package must actually load for this DPM's entry
+        # point. A version mismatch fails here (raises) rather than downstream.
+        if _release_load_verifier is not None:
+            _release_load_verifier(snapshot.id, settings)
         snapshot.status = SnapshotStatus.ready
         snapshot.error = None
         db.commit()

@@ -119,6 +119,14 @@ def create_app() -> FastAPI:
         lambda code: normalize_template_code(code, form="db")
     )
 
+    # Composition root: inject the empirical coherence gate into release
+    # creation. It loads the taxonomy package in Arelle for the DPM's
+    # current-release entry point (generation + validation stages), which the
+    # taxonomy stage must not import — so it is wired here.
+    from app.workflows.release_gate import verify_release_taxonomy_loads
+
+    taxonomy_service.set_release_load_verifier(verify_release_taxonomy_loads)
+
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:
         """Liveness probe. Intentionally does not touch the database."""

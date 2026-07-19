@@ -176,6 +176,47 @@ def test_delete_release_removes_everything(db_session: Session) -> None:
     assert again.status is SnapshotStatus.ready
 
 
+# --- the empirical load gate is the final step, and is transactional --------
+
+
+def test_load_gate_failure_purges_release(db_session: Session) -> None:
+    """The final creation gate (the taxonomy must load in Arelle for the DPM's
+    entry point) is transactional: if it fails, creation raises and leaves
+    nothing behind — same all-or-nothing contract as every other stage."""
+
+    def gate(snapshot_id: int, settings) -> None:
+        raise ValidationError(
+            "the taxonomy package does not match the DPM database"
+        )
+
+    service.set_release_load_verifier(gate)
+    try:
+        with pytest.raises(ValidationError, match="does not match"):
+            _create(db_session)
+        _assert_nothing_persisted(db_session)
+    finally:
+        service.set_release_load_verifier(None)
+
+
+def test_load_gate_runs_as_final_step_with_the_new_snapshot(
+    db_session: Session,
+) -> None:
+    """A passing gate is invoked with the created snapshot's id, after which the
+    release is committed ready."""
+    seen: dict[str, int] = {}
+
+    def gate(snapshot_id: int, settings) -> None:
+        seen["id"] = snapshot_id
+
+    service.set_release_load_verifier(gate)
+    try:
+        snap = _create(db_session)
+        assert snap.status is SnapshotStatus.ready
+        assert seen["id"] == snap.id
+    finally:
+        service.set_release_load_verifier(None)
+
+
 # --- endpoint: synchronous, all-or-nothing ---------------------------------
 
 
@@ -244,7 +285,6 @@ def test_stranded_ingesting_is_reclaimed_on_reupload(db_session: Session) -> Non
         rules_filename="rules.xlsx",
     )
     assert stranded.status is SnapshotStatus.ingesting
-    stranded_id = stranded.id
 
     # The same DPM again — previously a hard ConflictError; now it goes through.
     snap = _create(db_session)
