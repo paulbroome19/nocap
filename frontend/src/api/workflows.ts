@@ -361,11 +361,15 @@ export interface ReleaseProvision {
   module_version: string | null
   framework_version: string | null
   is_new: boolean
-  already_from: string | null
+  already_from: string | null // the taxonomy version it was first available from
 }
 
 export interface ReleaseProvisionsSummary {
   snapshot_id: number
+  // The release's own taxonomy version (e.g. "4.2.1") — shown on every row.
+  taxonomy_version: string
+  // No earlier release loaded → suppress the NEW badge (nothing to compare).
+  is_first_release: boolean
   provisions: ReleaseProvision[]
 }
 

@@ -119,13 +119,33 @@ def test_ingestion_summary_new_vs_existing(
     summary = vs.release_provisions_summary(db_session, s421.id)
     by_mod = {p.module_code: p for p in summary.provisions}
 
+    # The release's own taxonomy version is on the summary (shown on every row).
+    assert summary.taxonomy_version == "4.2.1"
+    assert summary.is_first_release is False  # 4.2 was loaded earlier
+
     assert by_mod["FINREP9"].module_version == "3.4.1"
     assert by_mod["FINREP9"].is_new is True
     assert by_mod["FINREP9"].already_from is None
 
     assert by_mod["COREP_LCR_DA"].module_version == "3.3.0"
     assert by_mod["COREP_LCR_DA"].is_new is False
-    assert by_mod["COREP_LCR_DA"].already_from == "EBA Taxonomy 4.2"
+    # Leads with the taxonomy version, not the display name.
+    assert by_mod["COREP_LCR_DA"].already_from == "4.2"
+
+
+def test_ingestion_summary_first_release_suppresses_new(
+    db_session: Session
+) -> None:
+    """The first release loaded has nothing to compare against: taxonomy version
+    present, is_first_release true, and modules read as new-but-unbadged (the UI
+    suppresses the badge)."""
+    s = _release(db_session, "4.2", [_LCR])
+    _wf(db_session, "COREP LCR", "COREP_LCR_DA")
+    summary = vs.release_provisions_summary(db_session, s.id)
+    assert summary.taxonomy_version == "4.2"
+    assert summary.is_first_release is True
+    lcr = next(p for p in summary.provisions if p.module_code == "COREP_LCR_DA")
+    assert lcr.module_version == "3.3.0" and lcr.already_from is None
 
 
 def test_ingestion_summary_reports_module_absent(db_session: Session) -> None:
@@ -243,6 +263,9 @@ def test_provisions_endpoint(client, db_session, three_releases) -> None:
     s42, s421, s422 = three_releases
     resp = client.get(f"/api/workflows/releases/{s421.id}/provisions")
     assert resp.status_code == 200
-    by_mod = {p["module_code"]: p for p in resp.json()["provisions"]}
+    body = resp.json()
+    assert body["taxonomy_version"] == "4.2.1"
+    assert body["is_first_release"] is False
+    by_mod = {p["module_code"]: p for p in body["provisions"]}
     assert by_mod["FINREP9"]["is_new"] is True
-    assert by_mod["COREP_LCR_DA"]["already_from"] == "EBA Taxonomy 4.2"
+    assert by_mod["COREP_LCR_DA"]["already_from"] == "4.2"
