@@ -134,3 +134,57 @@ def test_ingestion_summary_reports_module_absent(db_session: Session) -> None:
     summary = vs.release_provisions_summary(db_session, s.id)
     finrep = next(p for p in summary.provisions if p.module_code == "FINREP9")
     assert finrep.module_version is None and finrep.is_new is False
+
+
+# --- endpoints (API layer + serialization) ---------------------------------
+
+
+def test_module_versions_endpoint(client, db_session, three_releases) -> None:
+    wf = _wf(db_session, "FINREP 9", "FINREP9")
+    resp = client.get(f"/api/workflows/configs/{wf.id}/module-versions")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [o["module_version"] for o in body["options"]] == [
+        "3.4.2", "3.4.1", "3.4.0",
+    ]
+    # Nothing is preselected — the client renders no default choice.
+    assert body["module_code"] == "FINREP9"
+
+
+def test_module_versions_endpoint_empty_when_absent(client, db_session) -> None:
+    _release(db_session, "4.2", [_LCR])  # no FINREP9
+    wf = _wf(db_session, "FINREP 9", "FINREP9")
+    resp = client.get(f"/api/workflows/configs/{wf.id}/module-versions")
+    assert resp.status_code == 200 and resp.json()["options"] == []
+
+
+def test_create_run_freezes_module_and_framework_version(
+    db_session, ready_snapshot, lcr_workflow, entity
+) -> None:
+    """A run records the module version + framework version it bound to, so its
+    history is reproducible even after later releases change what's provided."""
+    from datetime import date
+
+    from app.workflows import service as wf_service
+
+    run = wf_service.create_run(
+        db_session,
+        workflow_id=lcr_workflow.id,
+        snapshot_id=ready_snapshot.id,
+        reference_date=date(2026, 3, 31),
+        entity_id=entity.id,
+    )
+    # mini DPM: COREP_LCR_DA VersionNumber 3.3.0 at release code 4.2.
+    assert run.module_version == "3.3.0"
+    assert run.framework_version == "4.2"
+
+
+def test_provisions_endpoint(client, db_session, three_releases) -> None:
+    _wf(db_session, "COREP LCR", "COREP_LCR_DA")
+    _wf(db_session, "FINREP 9", "FINREP9")
+    s42, s421, s422 = three_releases
+    resp = client.get(f"/api/workflows/releases/{s421.id}/provisions")
+    assert resp.status_code == 200
+    by_mod = {p["module_code"]: p for p in resp.json()["provisions"]}
+    assert by_mod["FINREP9"]["is_new"] is True
+    assert by_mod["COREP_LCR_DA"]["already_from"] == "EBA Taxonomy 4.2"
