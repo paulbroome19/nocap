@@ -1,12 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { listSnapshots, type Snapshot } from '../../api/snapshots'
 import {
   attachFactFile,
   deleteRun,
   DependencyChangedError,
   executeRun,
+  listEntities,
   reexecuteRun,
   type DependencyChange,
+  type Entity,
+  type ReexecuteOptions,
   type Run,
 } from '../../api/workflows'
 import RunStatusBadge from '../../components/RunStatusBadge'
@@ -67,7 +71,8 @@ function StageCard({
 
 export default function RunCover() {
   const ctx = useRun()
-  const { detail, config, entity, release, facts, siblings, id } = ctx
+  const { detail, config, entity, release, entityMissing, releaseMissing,
+    facts, siblings, id } = ctx
   const { run, verdict } = detail
   const navigate = useNavigate()
 
@@ -76,6 +81,25 @@ export default function RunCover() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [changes, setChanges] = useState<DependencyChange[] | null>(null)
+  const [pickEntities, setPickEntities] = useState<Entity[]>([])
+  const [pickReleases, setPickReleases] = useState<Snapshot[]>([])
+  const [selEntity, setSelEntity] = useState<number | ''>('')
+  const [selRelease, setSelRelease] = useState<number | ''>('')
+
+  const needEntity = (changes ?? []).some((c) => c.kind === 'entity_deleted')
+  const needRelease = (changes ?? []).some(
+    (c) => c.kind === 'release_deleted' || c.kind === 'release_unavailable',
+  )
+
+  // When a vanished dependency must be reselected, load the current options.
+  useEffect(() => {
+    if (needEntity && pickEntities.length === 0) {
+      listEntities().then(setPickEntities).catch(() => {})
+    }
+    if (needRelease && pickReleases.length === 0) {
+      listSnapshots().then(setPickReleases).catch(() => {})
+    }
+  }, [needEntity, needRelease, pickEntities.length, pickReleases.length])
 
   // Frozen at execution — read from the run, never the live entity (which is
   // still fetched for other purposes but must not drive historical identity).
@@ -107,13 +131,13 @@ export default function RunCover() {
     }
   }
 
-  async function runResubmit(acknowledge: boolean) {
+  async function runResubmit(opts: ReexecuteOptions) {
     if (!file) return
     setError(null)
-    setChanges(null)
     try {
       setBusy('Creating execution…')
-      const fresh = await reexecuteRun(id, acknowledge)
+      const fresh = await reexecuteRun(id, opts)
+      setChanges(null)
       setBusy('Uploading facts…')
       await attachFactFile(fresh.id, file)
       setBusy('Generating & validating…')
@@ -121,8 +145,8 @@ export default function RunCover() {
       navigate(`/reporting/runs/${fresh.id}`)
     } catch (e) {
       if (e instanceof DependencyChangedError) {
-        // The entity or release changed since the last execution — surface what
-        // changed and require explicit confirmation before re-binding.
+        // The entity or release changed/vanished since the last execution —
+        // surface what changed and require a deliberate choice before re-binding.
         setChanges(e.changes)
         setBusy(null)
         return
@@ -131,6 +155,20 @@ export default function RunCover() {
       setBusy(null)
     }
   }
+
+  // Resolve the surfaced changes: reselect any vanished dependency, and
+  // acknowledge any still-usable change.
+  function resolveAndResubmit() {
+    void runResubmit({
+      acknowledge: true,
+      entityId: needEntity && selEntity !== '' ? selEntity : undefined,
+      releaseSnapshotId:
+        needRelease && selRelease !== '' ? selRelease : undefined,
+    })
+  }
+
+  const reselectReady =
+    (!needEntity || selEntity !== '') && (!needRelease || selRelease !== '')
 
   const validationSummary =
     verdict.submittable === null
@@ -177,6 +215,18 @@ export default function RunCover() {
           <KeyChip label="Version" value={run.version_key} />
         </div>
       </Card>
+
+      {(entityMissing || releaseMissing) && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {entityMissing && releaseMissing
+            ? 'The entity and the taxonomy release this run used no longer exist.'
+            : entityMissing
+              ? 'The entity this run used no longer exists.'
+              : 'The taxonomy release this run used no longer exists.'}{' '}
+          Its recorded values are shown from the run itself. Re-executing will ask
+          you to choose a current one.
+        </div>
+      )}
 
       <VerdictBanner verdict={verdict} />
 
@@ -272,27 +322,71 @@ export default function RunCover() {
             {changes && (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
                 <div className="text-sm font-semibold text-amber-900">
-                  Confirm before re-executing
+                  {needEntity || needRelease
+                    ? 'A dependency is no longer available'
+                    : 'Confirm before re-executing'}
                 </div>
-                <p className="mt-1 text-xs text-amber-800">
-                  The entity or taxonomy release has changed since this
-                  instance's last execution. Review what changed, then confirm to
-                  execute against the current values.
-                </p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-900">
                   {changes.map((c, i) => (
                     <li key={i}>{c.message}</li>
                   ))}
                 </ul>
+
+                {needEntity && (
+                  <label className="mt-3 block text-xs font-medium text-amber-900">
+                    Select a current entity
+                    <select
+                      className="mt-1 block w-full rounded border border-amber-300 bg-white px-2 py-1.5 text-sm text-slate-800"
+                      value={selEntity}
+                      onChange={(e) => setSelEntity(Number(e.target.value))}
+                    >
+                      <option value="">Choose an entity…</option>
+                      {pickEntities.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name} · {e.lei}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {needRelease && (
+                  <label className="mt-3 block text-xs font-medium text-amber-900">
+                    Select a current release
+                    <select
+                      className="mt-1 block w-full rounded border border-amber-300 bg-white px-2 py-1.5 text-sm text-slate-800"
+                      value={selRelease}
+                      onChange={(e) => setSelRelease(Number(e.target.value))}
+                    >
+                      <option value="">Choose a release…</option>
+                      {pickReleases.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
                 <div className="mt-3 flex items-center gap-3">
-                  <button
-                    type="button"
-                    className={primaryBtn}
-                    disabled={busy !== null}
-                    onClick={() => void runResubmit(true)}
-                  >
-                    Confirm &amp; re-execute
-                  </button>
+                  {needEntity || needRelease ? (
+                    <button
+                      type="button"
+                      className={primaryBtn}
+                      disabled={busy !== null || !reselectReady}
+                      onClick={resolveAndResubmit}
+                    >
+                      Continue with selected
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={primaryBtn}
+                      disabled={busy !== null}
+                      onClick={() => void runResubmit({ acknowledge: true })}
+                    >
+                      Confirm &amp; re-execute
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={secondaryBtn}
@@ -301,6 +395,7 @@ export default function RunCover() {
                   >
                     Cancel
                   </button>
+                  {busy && <span className="text-sm text-slate-500">{busy}</span>}
                 </div>
               </div>
             )}
@@ -310,7 +405,7 @@ export default function RunCover() {
                   type="button"
                   className={primaryBtn}
                   disabled={!file || busy !== null}
-                  onClick={() => void runResubmit(false)}
+                  onClick={() => void runResubmit({})}
                 >
                   Resubmit
                 </button>

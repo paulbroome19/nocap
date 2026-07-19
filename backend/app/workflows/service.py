@@ -692,51 +692,84 @@ def detect_dependency_changes(
     return changes
 
 
+# Change kinds detect_dependency_changes emits, grouped by dependency and by how
+# they can be resolved before a new execution.
+_ENTITY_CHANGE_KINDS = {"entity_deleted", "entity_changed"}
+_RELEASE_CHANGE_KINDS = {"release_deleted", "release_unavailable", "release_changed"}
+# A vanished dependency can only be resolved by choosing a current one; a changed
+# but still-usable one may instead be acknowledged (proceed with current values).
+_MUST_RESELECT_KINDS = {"entity_deleted", "release_deleted", "release_unavailable"}
+
+
 def reexecute_run(
     db: Session,
     source_run_id: int,
     *,
+    entity_id: int | None = None,
+    release_snapshot_id: int | None = None,
     acknowledge_changes: bool = False,
     settings: Settings | None = None,
 ) -> Run:
     """Create a fresh execution of an existing instance (re-execute / resubmit).
 
     Append-only: a new ``Run`` is created carrying the source run's instance
-    identity (entity, reporting date, instance keys) and its release binding and
-    parameters; the source run and all prior executions are untouched. The caller
-    then attaches a new fact file and executes, exactly as for a first run.
+    identity (reporting date, instance keys) and its parameters; the source run
+    and all prior executions are untouched. The caller then attaches a new fact
+    file and executes, exactly as for a first run.
 
     Before creating the new execution the instance's live dependencies (entity,
-    release) are checked against what the source run froze; if any have changed
-    or disappeared this raises ``DependencyChangedError`` (carrying the list of
-    changes) unless ``acknowledge_changes=True`` — so the user confirms the
-    re-bind rather than the system silently substituting a dependency.
+    release) are checked against what the source run froze. Any unresolved change
+    raises ``DependencyChangedError`` (carrying the list) so the user acts
+    deliberately rather than the system silently re-binding. A change is resolved
+    by either:
+
+    - **choosing a current dependency** — ``entity_id`` selects a replacement
+      entity, ``release_snapshot_id`` a replacement release; or
+    - **acknowledging** (``acknowledge_changes=True``) — allowed only for a
+      dependency that changed but is *still usable*; a *vanished* dependency
+      (deleted entity / deleted or unusable release) must be reselected.
     """
     settings = settings or get_settings()
     src = get_run(db, source_run_id)
-    if src.entity_id is None:
-        raise ValidationError(
-            f"run id={source_run_id} has no entity; cannot re-execute"
-        )
+
     changes = detect_dependency_changes(db, src, settings=settings)
-    if changes and not acknowledge_changes:
-        raise DependencyChangedError(
-            "The entity or taxonomy release for this instance has changed since "
-            "its last execution. Review the changes and confirm to continue.",
-            details=changes,
+    overrode_entity = entity_id is not None
+    overrode_release = release_snapshot_id is not None
+    unresolved = [
+        c
+        for c in changes
+        if not (
+            (c["kind"] in _ENTITY_CHANGE_KINDS and overrode_entity)
+            or (c["kind"] in _RELEASE_CHANGE_KINDS and overrode_release)
+            or (c["kind"] not in _MUST_RESELECT_KINDS and acknowledge_changes)
         )
+    ]
+    if unresolved:
+        raise DependencyChangedError(
+            "The entity or taxonomy release for this instance is no longer usable "
+            "or has changed. Choose a current one (or confirm the change) to "
+            "continue.",
+            details=unresolved,
+        )
+
+    # Effective dependencies: an override wins, else the source run's. Choosing a
+    # new release lets create_run pick that snapshot's current release id.
+    eff_entity_id = entity_id if overrode_entity else src.entity_id
+    eff_snapshot_id = release_snapshot_id if overrode_release else src.snapshot_id
+    eff_release_id = None if overrode_release else src.release_id
+
     new_run = create_run(
         db,
         workflow_id=src.workflow_id,
-        snapshot_id=src.snapshot_id,
+        snapshot_id=eff_snapshot_id,
         reference_date=src.reference_date,
-        entity_id=src.entity_id,
+        entity_id=eff_entity_id,
         snapshot_key=src.snapshot_key,
         adjusted_key=src.adjusted_key,
         version_key=src.version_key,
         base_currency=src.base_currency,
         decimals=src.decimals,
-        release_id=src.release_id,
+        release_id=eff_release_id,
         settings=settings,
     )
     logger.info(

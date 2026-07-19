@@ -25,6 +25,8 @@ export default function RunLayout() {
   const [config, setConfig] = useState<WorkflowConfig | null>(null)
   const [entity, setEntity] = useState<Entity | null>(null)
   const [release, setRelease] = useState<Snapshot | null>(null)
+  const [entityMissing, setEntityMissing] = useState(false)
+  const [releaseMissing, setReleaseMissing] = useState(false)
   const [facts, setFacts] = useState<FactRow[] | null>(null)
   const [siblings, setSiblings] = useState<Run[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -34,8 +36,23 @@ export default function RunLayout() {
       .then((d) => {
         setDetail(d)
         getConfig(d.run.workflow_id).then(setConfig)
-        if (d.run.entity_id) getEntity(d.run.entity_id).then(setEntity).catch(() => {})
-        getSnapshot(d.run.snapshot_id).then(setRelease).catch(() => {})
+        // The entity/release may have been deleted since this run executed. The
+        // run renders its frozen values regardless; we track the absence so the
+        // detail can say so plainly instead of silently degrading.
+        if (d.run.entity_id) {
+          getEntity(d.run.entity_id)
+            .then((e) => {
+              setEntity(e)
+              setEntityMissing(false)
+            })
+            .catch(() => setEntityMissing(true))
+        }
+        getSnapshot(d.run.snapshot_id)
+          .then((r) => {
+            setRelease(r)
+            setReleaseMissing(false)
+          })
+          .catch(() => setReleaseMissing(true))
         runHistory(d.run.workflow_id)
           .then((h) => setSiblings(instanceSiblings(d.run, h)))
           .catch(() => setSiblings([]))
@@ -69,7 +86,8 @@ export default function RunLayout() {
     )
 
   const ctx: RunCtx = {
-    id, detail, config, entity, release, facts, siblings, regulatorCode, reload,
+    id, detail, config, entity, release, entityMissing, releaseMissing,
+    facts, siblings, regulatorCode, reload,
   }
   return <Outlet context={ctx} />
 }
