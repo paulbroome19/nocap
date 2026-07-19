@@ -1,0 +1,35 @@
+# Keep the build context small and reproducible — never ship local state.
+.git
+.idea
+.vscode
+**/.DS_Store
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+**/.coverage
+
+# Node / frontend (rebuilt inside the image)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local uploaded-file storage (the ~800 MB DPM snapshot, run artifacts, cache).
+# The deployed app writes to the mounted volume, never the image.
+backend/data/
+data/
+
+# Large untracked reference downloads
+docs/reference/
+
+# Tests' generated fixtures
+backend/tests/fixtures/*.sqlite
+
+# Env / secrets
+.env
+.env.*
+!.env.example
