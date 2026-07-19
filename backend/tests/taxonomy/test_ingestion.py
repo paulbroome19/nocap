@@ -34,10 +34,28 @@ def test_register_stores_file_and_computes_checksum(db_session: Session) -> None
     assert src.exists() and src.read_bytes() == b"hello"
 
 
-def test_duplicate_checksum_rejected(db_session: Session) -> None:
-    _register(db_session, b"same-bytes")
+def test_duplicate_of_ready_release_rejected(db_session: Session) -> None:
+    """A duplicate of a genuine, usable (ready) release is rejected."""
+    snap = _register(db_session, b"same-bytes")
+    snap.status = SnapshotStatus.ready  # a completed, usable release
+    db_session.commit()
     with pytest.raises(ConflictError):
         _register(db_session, b"same-bytes")
+
+
+def test_duplicate_of_incomplete_release_is_reclaimed(db_session: Session) -> None:
+    """A duplicate of an incomplete (``ingesting``) attempt is *not* rejected —
+    the stranded row is reclaimed so a stuck upload can always be retried."""
+    first = _register(db_session, b"same-bytes")
+    first_id = first.id
+    assert first.status is SnapshotStatus.ingesting
+    second = _register(db_session, b"same-bytes")  # no ConflictError
+    assert second.status is SnapshotStatus.ingesting
+    # The stranded attempt was purged; only the fresh registration remains.
+    assert db_session.query(service.TaxonomySnapshot).count() == 1
+    assert db_session.get(service.TaxonomySnapshot, first_id) is None or (
+        second.id == first_id
+    )
 
 
 def test_empty_upload_rejected(db_session: Session) -> None:

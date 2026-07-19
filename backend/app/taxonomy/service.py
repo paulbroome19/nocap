@@ -24,7 +24,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -377,9 +377,23 @@ def register_snapshot(
         select(TaxonomySnapshot).where(TaxonomySnapshot.checksum == checksum)
     )
     if existing is not None:
-        raise ConflictError(
-            f"this DPM file was already uploaded (snapshot id={existing.id})"
+        if existing.status in (
+            SnapshotStatus.ready,
+            SnapshotStatus.artifacts_missing,
+        ):
+            # A genuine, usable release already carries these bytes.
+            raise ConflictError(
+                f"this DPM file was already uploaded (snapshot id={existing.id})"
+            )
+        # An earlier attempt with these exact bytes never completed (interrupted
+        # mid-creation, so it is stuck ``ingesting``/``failed``). It is not a
+        # usable release and must never block a fresh upload: purge it entirely,
+        # then register anew. This is what lets a stranded creation be retried.
+        logger.warning(
+            "reclaiming incomplete snapshot id=%s (status=%s) for re-upload of "
+            "the same DPM", existing.id, existing.status,
         )
+        _purge_release(db, existing, settings=settings)
 
     snapshot = TaxonomySnapshot(
         regulator_id=regulator_id,
@@ -574,15 +588,59 @@ def create_release(
 ) -> TaxonomySnapshot:
     """Create a release from its three mandatory artifacts — all or nothing.
 
-    Every stage runs *before the release exists*: the three files are verified,
-    stored, the DPM is converted to the query database, and the validation rules
-    are ingested. Only if all of that succeeds is the release committed ``ready``
-    and returned — so a listed release is always usable. Any failure removes the
-    row and every stored file and raises a plain-language reason; there is never
-    a partial, ``ingesting``, or ``failed`` release left behind.
+    Synchronous orchestration (``begin_release`` then ``finalize_release``): the
+    three files are verified, stored, the DPM is converted, and the rules are
+    ingested; only if all of that succeeds is the release committed ``ready``.
+    Any failure removes the row and every stored file and raises a plain-language
+    reason — never a partial, ``ingesting``, or ``failed`` release left behind.
 
-    The DPM conversion + rule parse are the slow steps (~seconds); the caller
-    runs this synchronously and shows progress at the upload surface.
+    The HTTP path does **not** call this: it splits the work into
+    ``begin_release`` (fast, in-request) + ``create_release_task`` (the slow
+    conversion + ingestion, in the background) so a request timeout or dropped
+    connection can never strand a half-built release. This synchronous form is
+    kept for direct callers and tests.
+    """
+    settings = settings or get_settings()
+    snapshot = begin_release(
+        db,
+        regulator_id=regulator_id,
+        version_label=version_label,
+        dpm_bytes=dpm_bytes,
+        dpm_filename=dpm_filename,
+        taxonomy_bytes=taxonomy_bytes,
+        taxonomy_filename=taxonomy_filename,
+        rules_bytes=rules_bytes,
+        rules_filename=rules_filename,
+        settings=settings,
+        dpm_verifier=dpm_verifier,
+    )
+    finalize_release(db, snapshot, settings=settings, converter=converter)
+    return snapshot
+
+
+def begin_release(
+    db: Session,
+    *,
+    regulator_id: int,
+    version_label: str,
+    dpm_bytes: bytes,
+    dpm_filename: str,
+    taxonomy_bytes: bytes,
+    taxonomy_filename: str,
+    rules_bytes: bytes,
+    rules_filename: str,
+    settings: Settings | None = None,
+    dpm_verifier=looks_like_access,
+) -> TaxonomySnapshot:
+    """Phase 1 of creation: verify every file, then persist the release row and
+    its three stored artifacts as ``ingesting``.
+
+    Verification failures raise here and persist **nothing** (they are the
+    common, user-correctable errors — wrong file, bad workbook — so they are
+    reported synchronously to the uploader). This phase is fast (no DPM
+    conversion, no rule ingestion), so it completes well within the request
+    timeout; the slow work is ``finalize_release``. A release in this state is
+    ``ingesting`` and therefore never listed as usable.
     """
     settings = settings or get_settings()
     # Local imports keep the stage's public surface clean; both are same-stage.
@@ -598,8 +656,9 @@ def create_release(
     _artifacts.verify_taxonomy_package(taxonomy_bytes, taxonomy_filename)
     _rules.verify_workbook_file(rules_bytes, rules_filename)
 
-    # All verified — persist the DPM (dedups by checksum) then do the full work
-    # transactionally: any failure purges the release entirely (no residue).
+    # All verified — persist the DPM (dedups by checksum, reclaiming any stranded
+    # earlier attempt) and store the other two artifacts. A failure here purges
+    # the just-registered release so nothing partial survives.
     snapshot = register_snapshot(
         db,
         file_bytes=dpm_bytes,
@@ -618,7 +677,33 @@ def create_release(
             db, snapshot, filename=rules_filename, data=rules_bytes,
             settings=settings,
         )
-        # Slow work, synchronously — the release exists only on full success.
+    except Exception:
+        _purge_release(db, snapshot, settings=settings)
+        raise
+    logger.info("began release id=%s (ingesting)", snapshot.id)
+    return snapshot
+
+
+def finalize_release(
+    db: Session,
+    snapshot: TaxonomySnapshot,
+    *,
+    settings: Settings | None = None,
+    converter=convert_accdb_to_sqlite,
+) -> None:
+    """Phase 2 of creation: the slow work — convert the DPM and ingest the rules
+    — then flip the release to ``ready``.
+
+    Any failure purges the release **entirely** (row, child rows, on-disk files)
+    and re-raises a plain-language reason. This is what makes creation genuinely
+    all-or-nothing even for the slow stages: whether it runs inline
+    (``create_release``) or in the background (``create_release_task``), a
+    failure leaves no residue and thus never blocks a retry.
+    """
+    settings = settings or get_settings()
+    from app.taxonomy import rules as _rules
+
+    try:
         _convert_dpm(db, snapshot, settings=settings, converter=converter)
         _rules.ingest_validation_rules(db, snapshot, settings=settings)
         rules_art = db.scalar(
@@ -642,7 +727,88 @@ def create_release(
             raise  # already a plain-language reason
         raise ValidationError(f"the release could not be created: {exc}") from exc
     logger.info("created release id=%s (ready)", snapshot.id)
-    return snapshot
+
+
+def create_release_task(snapshot_id: int) -> None:
+    """Background entrypoint: finalize a begun release by id, in its own session.
+
+    Opens a fresh session (the request's has been closed). On success the release
+    turns ``ready``; on failure ``finalize_release`` has already purged it, so
+    nothing is left behind. If the row has already gone (e.g. a concurrent
+    reclaim), this is a no-op. Exceptions are logged, not raised — there is no
+    request left to receive them.
+    """
+    settings = get_settings()
+    with SessionLocal() as db:
+        snapshot = db.get(TaxonomySnapshot, snapshot_id)
+        if snapshot is None:
+            logger.warning(
+                "create task: snapshot id=%s already gone; nothing to finalize",
+                snapshot_id,
+            )
+            return
+        try:
+            finalize_release(db, snapshot, settings=settings)
+        except Exception:  # noqa: BLE001 — already purged + surfaced via status
+            logger.exception(
+                "background release creation failed for snapshot id=%s "
+                "(purged; the uploader may retry)", snapshot_id,
+            )
+
+
+def clear_incomplete_creations(
+    db: Session, *, settings: Settings | None = None
+) -> int:
+    """Purge releases stranded mid-creation, returning how many were cleared.
+
+    Run at startup so a container killed during the slow DPM conversion
+    self-heals: a release still ``ingesting`` that never ingested any validation
+    rules never reached ``ready`` — it is a dead half-creation, so it is removed
+    entirely (freeing its checksum and files) and the operator can simply retry.
+
+    A *real* release whose re-ingest was interrupted keeps its previously
+    ingested rules, so it is never purged here; it is marked ``failed`` (with a
+    recoverable message) instead. This is the deploy-time and on-demand lever for
+    clearing a stuck upload (see ``app.taxonomy.reconcile``).
+    """
+    settings = settings or get_settings()
+    purged = 0
+    stranded = list(
+        db.scalars(
+            select(TaxonomySnapshot).where(
+                TaxonomySnapshot.status == SnapshotStatus.ingesting
+            )
+        )
+    )
+    for snap in stranded:
+        rule_count = (
+            db.scalar(
+                select(func.count()).select_from(ValidationRule).where(
+                    ValidationRule.snapshot_id == snap.id
+                )
+            )
+            or 0
+        )
+        if rule_count > 0:
+            # Not a fresh creation — a live release mid-reingest. Never destroy
+            # it: record the interruption so it can be re-ingested or deleted.
+            snap.status = SnapshotStatus.failed
+            snap.error = (
+                "ingestion was interrupted before it completed; re-ingest from "
+                "the stored original to recover"
+            )
+            db.commit()
+            logger.warning(
+                "snapshot id=%s: interrupted re-ingest marked failed", snap.id
+            )
+        else:
+            _purge_release(db, snap, settings=settings)
+            purged += 1
+            logger.warning(
+                "cleared incomplete release id=%s (stranded mid-creation)",
+                snap.id,
+            )
+    return purged
 
 
 def _purge_release(

@@ -173,6 +173,7 @@ def download_artifact(
 
 @router.post("/releases", response_model=SnapshotOut, status_code=201)
 async def create_release(
+    background: BackgroundTasks,
     version_label: str = Form(...),
     regulator_id: int = Form(...),
     dpm_file: UploadFile = File(...),
@@ -180,24 +181,33 @@ async def create_release(
     rules_file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> SnapshotOut:
-    """Create a release from its three mandatory artifacts — all or nothing.
+    """Create a release from its three mandatory artifacts.
 
-    Verification, DPM conversion, and rule ingestion all complete before the
-    release exists; a failure at any stage creates no release and leaves no files
-    (HTTP 422 with a plain-language reason). On success the release is returned
-    ``ready`` — a listed release is always usable.
+    The three files are verified and stored **synchronously**: a wrong file is
+    rejected here (HTTP 422, plain-language reason) with nothing created. The
+    slow DPM conversion + rule ingestion then run in the **background**, so the
+    request returns promptly — well inside the platform's proxy timeout — with
+    the release ``ingesting``. The wizard polls the release until it turns
+    ``ready`` (or the row disappears, meaning the background stage failed and
+    cleaned itself up). A *listed* release is still only ever ``ready``: an
+    in-progress or failed one is never usable, and a background failure leaves no
+    residue to block a retry.
     """
-    snapshot = service.create_release(
+    dpm_bytes = await dpm_file.read()
+    taxonomy_bytes = await taxonomy_file.read()
+    rules_bytes = await rules_file.read()
+    snapshot = service.begin_release(
         db,
         regulator_id=regulator_id,
         version_label=version_label,
-        dpm_bytes=await dpm_file.read(),
+        dpm_bytes=dpm_bytes,
         dpm_filename=dpm_file.filename or "dpm.accdb",
-        taxonomy_bytes=await taxonomy_file.read(),
+        taxonomy_bytes=taxonomy_bytes,
         taxonomy_filename=taxonomy_file.filename or "taxonomy.zip",
-        rules_bytes=await rules_file.read(),
+        rules_bytes=rules_bytes,
         rules_filename=rules_file.filename or "rules.xlsx",
     )
+    background.add_task(service.create_release_task, snapshot.id)
     return _snapshot_out(db, snapshot)
 
 
