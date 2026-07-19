@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Entity, EntityWrite } from '../api/workflows'
-import { ErrorText, Select, fieldClass, primaryBtn, secondaryBtn } from './ui'
+import { ErrorText, FieldLabel, Select, fieldClass, primaryBtn, secondaryBtn } from './ui'
 
 export default function EntityForm({
   initial,
@@ -43,8 +43,8 @@ export default function EntityForm({
   return (
     <div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 sm:col-span-2">
-          <span className="text-xs font-medium text-slate-600">Name</span>
+        <label className="block sm:col-span-2">
+          <FieldLabel>Name</FieldLabel>
           <input
             className={fieldClass}
             value={name}
@@ -52,10 +52,8 @@ export default function EntityForm({
             placeholder="Legal entity name"
           />
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-slate-600">
-            LEI (20 chars)
-          </span>
+        <label className="block">
+          <FieldLabel>LEI (20 chars)</FieldLabel>
           <input
             className={`${fieldClass} font-mono`}
             value={lei}
@@ -65,8 +63,8 @@ export default function EntityForm({
           />
         </label>
         <div className="grid grid-cols-2 gap-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">Country</span>
+          <label className="block">
+            <FieldLabel>Country</FieldLabel>
             <input
               className={`${fieldClass} font-mono uppercase`}
               value={country}
@@ -75,8 +73,8 @@ export default function EntityForm({
               placeholder="GB"
             />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">Scope</span>
+          <label className="block">
+            <FieldLabel>Scope</FieldLabel>
             <Select value={scope} onChange={setScope}>
               <option value="CON">Consolidated (CON)</option>
               <option value="IND">Individual (IND)</option>

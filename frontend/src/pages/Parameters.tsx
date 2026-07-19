@@ -6,13 +6,15 @@ import {
 } from '../api/workflows'
 import EwcSelectors, { type EwcTarget } from '../components/EwcSelectors'
 import {
-  Card,
+  Block,
   EmptyState,
   ErrorText,
+  FieldLabel,
   PageHeader,
+  SectionLabel,
   Skeleton,
   fieldClass,
-  primaryBtn,
+  secondaryBtn,
 } from '../components/ui'
 
 export default function Parameters() {
@@ -72,9 +74,10 @@ export default function Parameters() {
         subtitle="Per entity and reporting suite, set the reporting currency and decimals. Blank uses the defaults."
       />
 
-      <Card className="mb-6 p-5">
+      <SectionLabel>Target</SectionLabel>
+      <Block className="mb-8 p-6">
         <EwcSelectors onChange={onChange} />
-      </Card>
+      </Block>
 
       <ErrorText>{error}</ErrorText>
 
@@ -83,50 +86,51 @@ export default function Parameters() {
       ) : config === null ? (
         <Skeleton className="h-32" />
       ) : (
-        <Card className="space-y-4 p-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-600">
-                Base currency
-              </span>
-              <input
-                type="text"
-                value={baseCurrency}
-                onChange={(e) => {
-                  setBaseCurrency(e.target.value.toUpperCase())
-                  setSaved(false)
-                }}
-                placeholder="EUR (default)"
-                maxLength={3}
-                className={`${fieldClass} font-mono uppercase`}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-600">Decimals</span>
-              <input
-                type="number"
-                value={decimals}
-                onChange={(e) => {
-                  setDecimals(e.target.value)
-                  setSaved(false)
-                }}
-                placeholder="-3 (default)"
-                className={`${fieldClass} font-mono`}
-              />
-            </label>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving}
-              className={primaryBtn}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            {saved && <span className="text-xs text-emerald-600">Saved</span>}
-          </div>
-        </Card>
+        <>
+          <SectionLabel>Package parameters</SectionLabel>
+          <Block className="mt-2.5 space-y-5 p-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <FieldLabel>Base currency</FieldLabel>
+                <input
+                  type="text"
+                  value={baseCurrency}
+                  onChange={(e) => {
+                    setBaseCurrency(e.target.value.toUpperCase())
+                    setSaved(false)
+                  }}
+                  placeholder="EUR (default)"
+                  maxLength={3}
+                  className={`${fieldClass} font-mono uppercase`}
+                />
+              </label>
+              <label className="block">
+                <FieldLabel>Decimals</FieldLabel>
+                <input
+                  type="number"
+                  value={decimals}
+                  onChange={(e) => {
+                    setDecimals(e.target.value)
+                    setSaved(false)
+                  }}
+                  placeholder="-3 (default)"
+                  className={`${fieldClass} font-mono`}
+                />
+              </label>
+            </div>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={saving}
+                className={secondaryBtn}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              {saved && <span className="text-[13px] text-sub">Saved</span>}
+            </div>
+          </Block>
+        </>
       )}
     </section>
   )

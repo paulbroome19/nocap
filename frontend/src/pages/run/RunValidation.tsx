@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { downloadRunFile, type RegisterRow } from '../../api/workflows'
 import VerdictBanner from '../../components/VerdictBanner'
-import { Card, EmptyState, PageHeader, Select } from '../../components/ui'
+import { Block, EmptyState, PageHeader, SectionLabel } from '../../components/ui'
 import { runCrumbs, useRun } from './context'
 
 type Bucket = 'blocking' | 'failure' | 'warning' | 'passed' | 'other'
@@ -13,193 +13,132 @@ function bucketOf(r: RegisterRow): Bucket {
   return 'other' // NOTE | DEACTIVATED
 }
 
-const BUCKET_META: Record<
-  Exclude<Bucket, 'other'>,
-  { label: string; edge: string; chip: string }
-> = {
-  blocking: {
-    label: 'Blocking failures',
-    edge: 'border-l-red-500',
-    chip: 'bg-red-100 text-red-800',
-  },
-  failure: {
-    label: 'Non-blocking rule failures',
-    edge: 'border-l-amber-500',
-    chip: 'bg-amber-100 text-amber-800',
-  },
-  warning: {
-    label: 'Warnings',
-    edge: 'border-l-amber-300',
-    chip: 'bg-amber-50 text-amber-700',
-  },
-  passed: {
-    label: 'Passed',
-    edge: 'border-l-emerald-400',
-    chip: 'bg-emerald-50 text-emerald-700',
-  },
+const RESULT_LABEL: Record<RegisterRow['result'], string> = {
+  FAILED: 'Failed',
+  WARNING: 'Warning',
+  PASSED: 'Passed',
+  NOTE: 'Note',
+  DEACTIVATED: 'Deactivated',
 }
 
-const RESULT_CHIP: Record<string, string> = {
-  FAILED: 'bg-red-50 text-red-700 ring-red-600/20',
-  WARNING: 'bg-amber-50 text-amber-700 ring-amber-600/20',
-  PASSED: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-  NOTE: 'bg-sky-50 text-sky-700 ring-sky-600/20',
-  DEACTIVATED: 'bg-slate-100 text-slate-500 ring-slate-500/15',
-}
-
-function groupByTemplate(rows: RegisterRow[]): [string, RegisterRow[]][] {
-  const m = new Map<string, RegisterRow[]>()
-  for (const r of rows) {
-    const key = r.template ?? '—'
-    const arr = m.get(key)
-    if (arr) arr.push(r)
-    else m.set(key, [r])
-  }
-  return [...m.entries()].sort(([a], [b]) => {
-    if (a === '—') return 1
-    if (b === '—') return -1
-    return a.localeCompare(b)
-  })
-}
-
-function FindingRow({ row }: { row: RegisterRow }) {
+/** One rule as a register row, with its per-evaluation detail expandable. */
+function RuleRow({ row }: { row: RegisterRow }) {
   const [open, setOpen] = useState(false)
   const bucket = bucketOf(row)
-  const edge =
-    bucket === 'blocking'
-      ? 'border-l-red-500'
-      : bucket === 'failure' || bucket === 'warning'
-        ? 'border-l-amber-400'
-        : bucket === 'passed'
-          ? 'border-l-emerald-300'
-          : 'border-l-slate-200'
+  const failed = row.result === 'FAILED'
   const evals = row.evaluations ?? []
   const hasEvalDetail = row.source === 'formula' && evals.length > 0
   const provenance = row.source === 'formula' ? row.rule_text : row.description
+  const counts =
+    row.source === 'formula' &&
+    (row.satisfied != null || row.not_satisfied != null)
+      ? `${row.satisfied ?? 0} satisfied · ${row.not_satisfied ?? 0} not satisfied`
+      : null
 
   return (
-    <div className={`border-l-2 ${edge} bg-white`}>
-      <div className="flex items-start gap-3 px-4 py-3">
-        <div className="min-w-0 flex-1">
+    <>
+      <tr className="border-t border-divider align-top first:border-t-0">
+        <td className="px-6 py-3 font-mono text-[12px] tabular-nums text-muted">
+          {row.id}
+        </td>
+        <td className="px-6 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs tabular-nums text-slate-500">
-              {row.id}
-            </span>
-            <span className="text-sm font-medium text-slate-800">{row.rule}</span>
+            <span className="text-[13px] font-medium text-data">{row.rule}</span>
             {bucket === 'blocking' && (
-              <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+              <span className="rounded-[5px] bg-red px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-white">
                 Blocking
               </span>
             )}
-            {row.source === 'formula' && row.severity == null && (
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
-                severity unknown
-              </span>
-            )}
           </div>
-          {row.detail && (
-            <p className="mt-1 text-xs text-slate-600">{row.detail}</p>
-          )}
           {provenance && (
-            <p className="mt-1 text-[11px] text-slate-400">{provenance}</p>
+            <p className="mt-1 text-[12px] leading-snug text-muted">{provenance}</p>
           )}
-
-          {/* Formula: counts + per-evaluation detail, never a bare number. */}
-          {row.source === 'formula' &&
-            (row.satisfied != null || row.not_satisfied != null) && (
-              <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
-                <span className="tabular-nums">
-                  {row.satisfied ?? 0} satisfied · {row.not_satisfied ?? 0} not
-                  satisfied
-                </span>
-                {hasEvalDetail && (
-                  <button
-                    type="button"
-                    onClick={() => setOpen((o) => !o)}
-                    className="font-medium text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
-                  >
-                    {open ? 'Hide evaluations' : `Show ${evals.length} failing`}
-                  </button>
-                )}
-              </div>
-            )}
-          {open && hasEvalDetail && (
-            <div className="mt-2 overflow-hidden rounded-md border border-slate-200">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-slate-50 text-left text-[10px] font-medium uppercase tracking-wide text-slate-400">
-                    <th className="px-3 py-1.5 font-medium">Context</th>
-                    <th className="px-3 py-1.5 font-medium">Compared</th>
-                    <th className="px-3 py-1.5 font-medium">Verdict</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {evals.map((e, i) => (
-                    <tr key={i} className="border-t border-slate-100">
-                      <td className="px-3 py-1.5 font-mono tabular-nums text-slate-600">
-                        {e.template_code
-                          ? `${e.template_code} r${e.row_code} c${e.column_code}`
-                          : '—'}
-                      </td>
-                      <td className="px-3 py-1.5 font-mono tabular-nums text-slate-700">
-                        {e.values ?? '—'}
-                      </td>
-                      <td className="px-3 py-1.5 text-red-600">not satisfied</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        </td>
+        <td className="px-6 py-3 font-mono text-[12px] tabular-nums text-sub">
+          {row.data_evaluated || '—'}
+        </td>
+        <td className="px-6 py-3">
+          <span
+            className={`text-[13px] font-medium ${failed ? 'text-red' : 'text-sub'}`}
+          >
+            {RESULT_LABEL[row.result]}
+          </span>
+        </td>
+        <td className="px-6 py-3 text-[12px] text-sub">
+          {row.detail && <p className="leading-snug">{row.detail}</p>}
+          {counts && (
+            <div className="mt-1 flex flex-wrap items-center gap-2 tabular-nums text-muted">
+              <span>{counts}</span>
+              {hasEvalDetail && (
+                <button
+                  type="button"
+                  onClick={() => setOpen((o) => !o)}
+                  className="font-medium text-data underline-offset-2 hover:underline"
+                >
+                  {open ? 'Hide detail' : `View ${evals.length} not satisfied`}
+                </button>
+              )}
             </div>
           )}
-        </div>
-        <span
-          className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${
-            RESULT_CHIP[row.result] ?? RESULT_CHIP.NOTE
-          }`}
-        >
-          {row.result}
-        </span>
-      </div>
-    </div>
+        </td>
+      </tr>
+      {open && hasEvalDetail && (
+        <tr className="border-t border-divider bg-canvas">
+          <td />
+          <td colSpan={4} className="px-6 py-3">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
+                  <th className="py-1 pr-4 font-semibold">Context</th>
+                  <th className="py-1 pr-4 font-semibold">Compared</th>
+                  <th className="py-1 font-semibold">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evals.map((e, i) => (
+                  <tr key={i} className="border-t border-divider">
+                    <td className="py-1 pr-4 font-mono tabular-nums text-sub">
+                      {e.template_code
+                        ? `${e.template_code} r${e.row_code} c${e.column_code}`
+                        : '—'}
+                    </td>
+                    <td className="py-1 pr-4 font-mono tabular-nums text-data">
+                      {e.values ?? '—'}
+                    </td>
+                    <td className="py-1 text-red">Not satisfied</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
-function Section({
-  bucket,
-  rows,
-}: {
-  bucket: Exclude<Bucket, 'other'>
-  rows: RegisterRow[]
-}) {
-  if (rows.length === 0) return null
-  const meta = BUCKET_META[bucket]
+function Register({ rows }: { rows: RegisterRow[] }) {
   return (
-    <div>
-      <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-slate-900">{meta.label}</h2>
-        <span
-          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${meta.chip}`}
-        >
-          {rows.length}
-        </span>
+    <Block className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-divider text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+              <th className="px-6 py-2.5 font-semibold">ID</th>
+              <th className="px-6 py-2.5 font-semibold">Rule</th>
+              <th className="px-6 py-2.5 font-semibold">Data evaluated</th>
+              <th className="px-6 py-2.5 font-semibold">Result</th>
+              <th className="px-6 py-2.5 font-semibold">Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <RuleRow key={`${r.id}-${i}`} row={r} />
+            ))}
+          </tbody>
+        </table>
       </div>
-      <div className="space-y-4">
-        {groupByTemplate(rows).map(([template, group]) => (
-          <Card key={template} className="overflow-hidden">
-            <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-2">
-              <span className="font-mono text-xs font-semibold text-slate-600">
-                {template === '—' ? 'General' : template}
-              </span>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {group.map((r, i) => (
-                <FindingRow key={`${r.id}-${i}`} row={r} />
-              ))}
-            </div>
-          </Card>
-        ))}
-      </div>
-    </div>
+    </Block>
   )
 }
 
@@ -208,9 +147,6 @@ export default function RunValidation() {
   const { detail } = ctx
   const rows = detail.rule_register
   const report = detail.files.find((f) => f.role === 'validation_report')
-
-  const [filter, setFilter] = useState<'all' | Bucket>('all')
-  const [template, setTemplate] = useState<string>('all')
   const [showPassed, setShowPassed] = useState(false)
   const [showOther, setShowOther] = useState(false)
 
@@ -218,37 +154,12 @@ export default function RunValidation() {
     const b: Record<Bucket, RegisterRow[]> = {
       blocking: [], failure: [], warning: [], passed: [], other: [],
     }
-    const scoped =
-      template === 'all' ? rows : rows.filter((r) => r.template === template)
-    for (const r of scoped) b[bucketOf(r)].push(r)
+    for (const r of rows) b[bucketOf(r)].push(r)
     return b
-  }, [rows, template])
-
-  const templates = useMemo(
-    () => [...new Set(rows.map((r) => r.template).filter(Boolean))].sort(),
-    [rows],
-  )
-
-  const chip = (key: 'all' | Bucket, label: string, n: number) => (
-    <button
-      key={key}
-      type="button"
-      onClick={() => setFilter(key)}
-      className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-        filter === key
-          ? 'bg-slate-900 text-white'
-          : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50'
-      }`}
-    >
-      {label}
-      <span className="ml-1.5 tabular-nums opacity-70">{n}</span>
-    </button>
-  )
-
-  const showBucket = (b: Bucket) => filter === 'all' || filter === b
+  }, [rows])
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-6">
       <PageHeader
         crumbs={runCrumbs(ctx, 'Validation')}
         title="Validation"
@@ -257,9 +168,9 @@ export default function RunValidation() {
             <button
               type="button"
               onClick={() => void downloadRunFile(report.id, report.filename)}
-              className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+              className="text-[13px] font-medium text-sub underline-offset-2 hover:text-data hover:underline"
             >
-              Download report (HTML)
+              Download report
             </button>
           ) : undefined
         }
@@ -267,99 +178,98 @@ export default function RunValidation() {
 
       <VerdictBanner verdict={detail.verdict} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        {chip('all', 'All', rows.length)}
-        {chip('blocking', 'Blocking', byBucket.blocking.length)}
-        {chip('failure', 'Non-blocking', byBucket.failure.length)}
-        {chip('warning', 'Warnings', byBucket.warning.length)}
-        {chip('passed', 'Passed', byBucket.passed.length)}
-        {templates.length > 0 && (
-          <Select value={template} onChange={setTemplate} className="ml-auto w-48">
-            <option value="all">All templates</option>
-            {templates.map((t) => (
-              <option key={t} value={t as string}>
-                {t}
-              </option>
-            ))}
-          </Select>
-        )}
-      </div>
-
-      {rows.length === 0 && (
+      {rows.length === 0 ? (
         <EmptyState>No validation results yet for this run.</EmptyState>
-      )}
-
-      {/* Lead with what needs attention. */}
-      <div className="space-y-6">
-        {showBucket('blocking') && (
-          <Section bucket="blocking" rows={byBucket.blocking} />
-        )}
-        {showBucket('failure') && (
-          <Section bucket="failure" rows={byBucket.failure} />
-        )}
-        {showBucket('warning') && (
-          <Section bucket="warning" rows={byBucket.warning} />
-        )}
-
-        {/* Passed — summarised and collapsed by default. */}
-        {(filter === 'all' || filter === 'passed') &&
-          byBucket.passed.length > 0 &&
-          (filter === 'passed' || showPassed ? (
+      ) : (
+        <div className="space-y-8">
+          {/* Blocking first — what stops submission. */}
+          {byBucket.blocking.length > 0 && (
             <div>
-              {filter === 'all' && (
+              <SectionLabel>Blocking failures</SectionLabel>
+              <div className="mt-2.5">
+                <Register rows={byBucket.blocking} />
+              </div>
+            </div>
+          )}
+
+          {/* Then non-blocking rule failures and warnings. */}
+          {byBucket.failure.length > 0 && (
+            <div>
+              <SectionLabel>Non-blocking failures</SectionLabel>
+              <div className="mt-2.5">
+                <Register rows={byBucket.failure} />
+              </div>
+            </div>
+          )}
+
+          {byBucket.warning.length > 0 && (
+            <div>
+              <SectionLabel>Warnings</SectionLabel>
+              <div className="mt-2.5">
+                <Register rows={byBucket.warning} />
+              </div>
+            </div>
+          )}
+
+          {/* Passed — collapsed by default. */}
+          {byBucket.passed.length > 0 && (
+            <div>
+              {showPassed ? (
+                <>
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <SectionLabel>Passed</SectionLabel>
+                    <button
+                      type="button"
+                      onClick={() => setShowPassed(false)}
+                      className="text-[13px] font-medium text-sub hover:text-data"
+                    >
+                      Hide
+                    </button>
+                  </div>
+                  <Register rows={byBucket.passed} />
+                </>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => setShowPassed(false)}
-                  className="mb-2 text-xs font-medium text-slate-500 hover:text-slate-900"
+                  onClick={() => setShowPassed(true)}
+                  className="w-full rounded-[10px] border border-dashed border-faint bg-page px-4 py-3 text-center text-[13px] font-medium text-sub hover:border-muted hover:text-data"
                 >
-                  Hide passed
+                  {byBucket.passed.length} checks passed — view
                 </button>
               )}
-              <Section bucket="passed" rows={byBucket.passed} />
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowPassed(true)}
-              className="w-full rounded-lg border border-dashed border-slate-200 bg-white px-4 py-3 text-center text-xs font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700"
-            >
-              {byBucket.passed.length} checks passed — view
-            </button>
-          ))}
+          )}
 
-        {/* Informational: notes + workbook-deactivated rules, collapsed. */}
-        {filter === 'all' &&
-          byBucket.other.length > 0 &&
-          (showOther ? (
-            <Card className="overflow-hidden">
-              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-2">
-                <span className="text-xs font-semibold text-slate-500">
-                  Informational
-                </span>
+          {/* Informational: notes and deactivated rules, collapsed. */}
+          {byBucket.other.length > 0 && (
+            <div>
+              {showOther ? (
+                <>
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <SectionLabel>Informational</SectionLabel>
+                    <button
+                      type="button"
+                      onClick={() => setShowOther(false)}
+                      className="text-[13px] font-medium text-sub hover:text-data"
+                    >
+                      Hide
+                    </button>
+                  </div>
+                  <Register rows={byBucket.other} />
+                </>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => setShowOther(false)}
-                  className="text-xs font-medium text-slate-500 hover:text-slate-900"
+                  onClick={() => setShowOther(true)}
+                  className="w-full rounded-[10px] border border-dashed border-faint bg-page px-4 py-3 text-center text-[13px] font-medium text-sub hover:border-muted hover:text-data"
                 >
-                  Hide
+                  {byBucket.other.length} informational — view
                 </button>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {byBucket.other.map((r, i) => (
-                  <FindingRow key={`${r.id}-${i}`} row={r} />
-                ))}
-              </div>
-            </Card>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowOther(true)}
-              className="w-full rounded-lg border border-dashed border-slate-200 bg-white px-4 py-3 text-center text-xs font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700"
-            >
-              {byBucket.other.length} informational (notes · deactivated) — view
-            </button>
-          ))}
-      </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   )
 }
