@@ -275,6 +275,11 @@ class Run(Base):
     framework_version: Mapped[str | None] = mapped_column(
         String(32), nullable=True
     )
+    # The selected module version's reference-date applicability window, frozen
+    # here at creation so the report's out-of-window finding stays reconstructible
+    # even after the release (and its release_module rows) are deleted.
+    module_valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    module_valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # The validation-rule set applied, frozen when validation runs, so the report
     # can state it plainly: {count, module_code, module_version, framework_version,

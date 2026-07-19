@@ -179,6 +179,9 @@ export interface Run {
   // The taxonomy version this run was executed against, frozen at creation.
   module_version: string | null
   framework_version: string | null
+  // The version's reference-date applicability window, frozen at creation.
+  module_valid_from: string | null
+  module_valid_to: string | null
   // The validation-rule set applied, frozen when validation ran.
   rule_scope: RuleScope | null
   created_at: string
