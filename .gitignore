@@ -29,6 +29,9 @@ frontend/.vite/
 /data/
 backend/data/
 
+# Local launcher run logs (run-carter.sh)
+/.carter/
+
 # Test-generated fixture databases
 backend/tests/fixtures/*.sqlite
 

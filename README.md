@@ -11,6 +11,42 @@ external vendor for the EBA filing workflow (v1 target: COREP LCR, end to end).
 - **Frontend:** React + Vite, TypeScript, Tailwind
 - **Hosting:** Railway (web service + Postgres); twelve-factor config via env vars
 
+## Run it locally — one command (macOS)
+
+`run-carter.sh` at the repo root starts everything for you: it starts Postgres
+(in Docker) if it isn't already running, applies migrations, seeds reference
+data, starts the backend and frontend, waits until both are healthy, opens your
+browser at the app, and streams both logs into the terminal. Press **Ctrl-C** to
+shut everything down cleanly.
+
+```bash
+./run-carter.sh          # first time: chmod +x run-carter.sh
+```
+
+You still need the prerequisites installed once (see *Local development* below):
+Docker Desktop (running), the backend virtualenv, the frontend `node_modules`,
+and — to ingest a DPM `.accdb` — `mdbtools`. If something's missing the script
+stops with a plain message telling you exactly what to do. It runs its own
+isolated Postgres (container `carter-postgres`, host port `55432`, volume
+`carter-pgdata`) so it never collides with any other Postgres on `5432`; your
+data persists between runs. Override the DB port with `CARTER_PG_PORT=…`, or keep
+the database running after Ctrl-C with `KEEP_DB=1 ./run-carter.sh`.
+
+### Double-clickable launcher (Desktop)
+
+`carter.command` is a Finder-double-clickable wrapper (it opens Terminal and runs
+`run-carter.sh`). To put it on your Desktop:
+
+```bash
+cp carter.command ~/Desktop/carter.command      # copy it out of the repo
+chmod +x ~/Desktop/carter.command               # make it double-clickable
+```
+
+Then double-click **carter.command** on the Desktop to launch Carter. (If you
+ever move the repo, edit the `CARTER_REPO` path at the top of that file.)
+Depending on your Gatekeeper settings, the first double-click may need
+**right-click → Open** to confirm running it.
+
 ## Local development
 
 Prerequisites: Python 3.12, Node 20+, a local Postgres (a Docker container is
