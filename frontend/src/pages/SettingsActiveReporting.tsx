@@ -1,27 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { listRegulators } from '../api/snapshots'
 import {
   listConfigs,
   updateWorkflowSettings,
   type WorkflowConfig,
 } from '../api/workflows'
 import {
-  Card,
+  Block,
   ErrorText,
   PageHeader,
+  SectionLabel,
   Select,
   TableSkeleton,
 } from '../components/ui'
+import { CATEGORY_ORDER } from '../lib/categories'
 
-const CATEGORIES = ['Liquidity', 'Capital', 'Financial', 'Last Mile Reporting']
-
-function Toggle({
-  on,
-  onChange,
-}: {
-  on: boolean
-  onChange: (v: boolean) => void
-}) {
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
       type="button"
@@ -29,7 +24,7 @@ function Toggle({
       aria-checked={on}
       onClick={() => onChange(!on)}
       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-        on ? 'bg-slate-900' : 'bg-slate-200'
+        on ? 'bg-ink' : 'bg-field'
       }`}
     >
       <span
@@ -43,19 +38,22 @@ function Toggle({
 
 export default function SettingsActiveReporting() {
   const { regulatorCode = '' } = useParams()
+  const [regName, setRegName] = useState('')
   const [configs, setConfigs] = useState<WorkflowConfig[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState<number | null>(null)
 
   useEffect(() => {
+    listRegulators()
+      .then((rs) => setRegName(rs.find((r) => r.code === regulatorCode)?.name ?? ''))
+      .catch(() => {})
     listConfigs(true)
       .then(setConfigs)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [])
+  }, [regulatorCode])
 
   async function persist(wf: WorkflowConfig, patch: Partial<WorkflowConfig>) {
     const next = { ...wf, ...patch }
-    // Optimistic update.
     setConfigs((cs) => cs?.map((c) => (c.id === wf.id ? next : c)) ?? null)
     setSaving(wf.id)
     try {
@@ -66,7 +64,6 @@ export default function SettingsActiveReporting() {
       setConfigs((cs) => cs?.map((c) => (c.id === wf.id ? saved : c)) ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      // Roll back on failure.
       setConfigs((cs) => cs?.map((c) => (c.id === wf.id ? wf : c)) ?? null)
     } finally {
       setSaving(null)
@@ -79,69 +76,42 @@ export default function SettingsActiveReporting() {
         crumbs={[
           { label: 'Settings', to: '/settings' },
           { label: 'Reporting', to: '/settings/reporting' },
-          { label: regulatorCode },
+          { label: regName || regulatorCode },
         ]}
         title="Active reporting"
         subtitle="Which suites appear in Reporting, and their category."
       />
-
       <ErrorText>{error}</ErrorText>
 
-      <div>
-        {configs === null && !error ? (
-          <TableSkeleton />
-        ) : (
-          <Card className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500">
-                  <th className="px-4 py-3">Suite</th>
-                  <th className="px-4 py-3">Category</th>
-                  <th className="px-4 py-3 text-right">Active</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(configs ?? []).map((wf) => (
-                  <tr
-                    key={wf.id}
-                    className="border-b border-slate-100 last:border-0"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900">{wf.name}</div>
-                      <div className="font-mono text-xs text-slate-400">
-                        {wf.module_code}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Select
-                        value={wf.category ?? ''}
-                        disabled={saving === wf.id}
-                        onChange={(v) => void persist(wf, { category: v || null })}
-                        className="w-52"
-                      >
-                        <option value="">Uncategorised</option>
-                        {CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </Select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end">
-                        <Toggle
-                          on={wf.is_active}
-                          onChange={(v) => void persist(wf, { is_active: v })}
-                        />
-                      </div>
-                    </td>
-                  </tr>
+      <SectionLabel>Suite</SectionLabel>
+      {configs === null && !error ? (
+        <TableSkeleton />
+      ) : (
+        <Block>
+          {(configs ?? []).map((wf) => (
+            <div
+              key={wf.id}
+              className="flex items-center justify-between gap-6 border-t border-divider px-6 py-[18px] first:border-t-0"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[15px] font-semibold text-ink">{wf.name}</div>
+              </div>
+              <Select
+                value={wf.category ?? ''}
+                disabled={saving === wf.id}
+                onChange={(v) => void persist(wf, { category: v || null })}
+                className="w-56 shrink-0"
+              >
+                <option value="">Uncategorised</option>
+                {CATEGORY_ORDER.map((c) => (
+                  <option key={c} value={c}>{c}</option>
                 ))}
-              </tbody>
-            </table>
-          </Card>
-        )}
-      </div>
+              </Select>
+              <Toggle on={wf.is_active} onChange={(v) => void persist(wf, { is_active: v })} />
+            </div>
+          ))}
+        </Block>
+      )}
     </section>
   )
 }

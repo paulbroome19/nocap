@@ -8,10 +8,12 @@ import {
 } from '../api/workflows'
 import EntityForm from '../components/EntityForm'
 import {
-  Card,
+  Block,
   ErrorText,
   Loading,
   PageHeader,
+  SectionLabel,
+  dangerText,
   secondaryBtn,
 } from '../components/ui'
 
@@ -29,9 +31,9 @@ export default function EntityDetail() {
     if (!entity) return
     const message =
       `Delete ${entity.name}?\n\n` +
-      'This removes the entity and its per-workflow configuration. Runs already ' +
-      'produced for it are unaffected — they keep the values they used. This ' +
-      'cannot be undone.'
+      'This removes the entity and its per-suite configuration. Submissions ' +
+      'already produced for it are unaffected — they keep the values they used. ' +
+      'This cannot be undone.'
     if (!window.confirm(message)) return
     setBusy(true)
     try {
@@ -73,18 +75,14 @@ export default function EntityDetail() {
         title={entity.name}
         actions={
           !editing && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className={secondaryBtn}
-                onClick={() => setEditing(true)}
-              >
+            <div className="flex items-center gap-4">
+              <button type="button" className={secondaryBtn} onClick={() => setEditing(true)}>
                 Edit
               </button>
               <button
                 type="button"
                 disabled={busy}
-                className={`${secondaryBtn} text-red-600 hover:bg-red-50 disabled:opacity-50`}
+                className={`${dangerText} disabled:hover:text-sub`}
                 onClick={() => void handleDelete()}
               >
                 {busy ? 'Deleting…' : 'Delete'}
@@ -95,32 +93,37 @@ export default function EntityDetail() {
       />
 
       {editing ? (
-        <Card className="p-5">
-          <h2 className="mb-4 text-sm font-semibold text-slate-900">
-            Edit entity
-          </h2>
-          <EntityForm
-            initial={entity}
-            submitLabel="Save changes"
-            onCancel={() => setEditing(false)}
-            onSubmit={async (body) => {
-              const updated = await updateEntity(id, body)
-              setEntity(updated)
-              setEditing(false)
-            }}
-          />
-        </Card>
+        <>
+          <SectionLabel>Edit entity</SectionLabel>
+          <Block className="p-6">
+            <EntityForm
+              initial={entity}
+              submitLabel="Save changes"
+              onCancel={() => setEditing(false)}
+              onSubmit={async (body) => {
+                const updated = await updateEntity(id, body)
+                setEntity(updated)
+                setEditing(false)
+              }}
+            />
+          </Block>
+        </>
       ) : (
-        <Card className="p-5">
-          <dl className="grid grid-cols-3 gap-6 text-sm">
-            {meta.map(([k, v]) => (
-              <div key={k}>
-                <dt className="text-xs text-slate-400">{k}</dt>
-                <dd className="mt-0.5 font-mono text-slate-800">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        </Card>
+        <>
+          <SectionLabel>Details</SectionLabel>
+          <Block className="p-6">
+            <dl className="grid grid-cols-3 gap-8">
+              {meta.map(([k, v]) => (
+                <div key={k}>
+                  <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+                    {k}
+                  </dt>
+                  <dd className="mt-1 font-mono text-[14px] text-data">{v}</dd>
+                </div>
+              ))}
+            </dl>
+          </Block>
+        </>
       )}
     </section>
   )

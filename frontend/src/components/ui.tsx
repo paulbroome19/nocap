@@ -140,9 +140,7 @@ export function RowLink({
       <div className="min-w-0">
         <div className="truncate text-[15px] font-semibold text-ink">{title}</div>
         {subtitle && (
-          <div className="mt-1 truncate font-mono text-[12px] text-muted">
-            {subtitle}
-          </div>
+          <div className="mt-1 truncate text-[13px] text-muted">{subtitle}</div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-4">
