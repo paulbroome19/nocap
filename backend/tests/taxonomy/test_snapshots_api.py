@@ -19,6 +19,23 @@ def dpm_sqlite(tmp_path: Path) -> bytes:
     return dpm_mini.build(tmp_path / "dpm.sqlite").read_bytes()
 
 
+@pytest.fixture(autouse=True)
+def _background_session(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    """The release-creation endpoint finalizes (converts + ingests) in a
+    background task that opens its own SessionLocal. Bind that to the test engine
+    so it runs against this test's database; TestClient runs the task to
+    completion before the request returns, so the release ends up ``ready``."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app.taxonomy import service
+
+    monkeypatch.setattr(
+        service,
+        "SessionLocal",
+        sessionmaker(bind=db_session.get_bind(), autoflush=False),
+    )
+
+
 def _create(client: TestClient, db: Session, dpm: bytes):
     return client.post(
         "/api/taxonomy/releases",
@@ -37,10 +54,17 @@ def test_create_release_is_ready(
     resp = _create(client, db_session, dpm_sqlite)
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["status"] == "ready"  # never 'ingesting' — creation is synchronous
+    # Returned while the DPM converts in the background — never usable yet.
+    assert body["status"] == "ingesting"
     assert body["version_label"] == "4.2"
     assert body["original_filename"] == "dpm.sqlite"
     assert len(body["checksum"]) == 64
+
+    # The background finalize ran (TestClient awaits it): now ready and usable.
+    db_session.expire_all()
+    detail = client.get(f"/api/taxonomy/snapshots/{body['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "ready"
 
 
 def test_list_and_detail(

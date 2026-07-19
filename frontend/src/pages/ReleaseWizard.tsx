@@ -1,6 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { createRelease, getRegulator, type Regulator } from '../api/snapshots'
+import {
+  createRelease,
+  getRegulator,
+  getSnapshotOrNull,
+  type Regulator,
+} from '../api/snapshots'
 import UploadZone from '../components/UploadZone'
 import {
   Block,
@@ -51,10 +56,16 @@ export default function ReleaseWizard() {
   const [phase, setPhase] = useState<'idle' | 'uploading' | 'creating'>('idle')
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  // Set when the component unmounts, so an in-flight poll stops touching state.
+  const cancelled = useRef(false)
 
   useEffect(() => {
     getRegulator(id).then(setRegulator).catch(() => {})
   }, [id])
+
+  useEffect(() => () => {
+    cancelled.current = true
+  }, [])
 
   const ready =
     versionLabel.trim() !== '' &&
@@ -69,6 +80,8 @@ export default function ReleaseWizard() {
     setPhase('uploading')
     setProgress(0)
     try {
+      // The upload returns once the files are verified and stored; the release
+      // comes back `ingesting` while the DPM converts server-side.
       const release = await createRelease(
         id,
         versionLabel.trim(),
@@ -78,10 +91,60 @@ export default function ReleaseWizard() {
           if (f >= 1) setPhase('creating')
         },
       )
-      navigate(`/releases/${release.id}`)
+      setPhase('creating')
+      await pollUntilReady(release.id)
     } catch (e) {
-      // Nothing was created; keep the files so the wrong one can be swapped.
-      setError(e instanceof Error ? e.message : String(e))
+      // Verification rejected a file (or the network dropped) — nothing was
+      // created; keep the files so the wrong one can be swapped.
+      if (!cancelled.current) {
+        setError(e instanceof Error ? e.message : String(e))
+        setPhase('idle')
+      }
+    }
+  }
+
+  /**
+   * Poll the release until the background conversion finishes. `ready` →
+   * navigate to it (shown only once complete). Gone (404) → the background
+   * stage failed and cleaned itself up, leaving nothing behind; report it and
+   * let the user retry. Transient errors are ignored and retried.
+   */
+  async function pollUntilReady(releaseId: number) {
+    const deadline = Date.now() + 15 * 60 * 1000 // conversion can take minutes
+    while (!cancelled.current && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000))
+      if (cancelled.current) return
+      let snap
+      try {
+        snap = await getSnapshotOrNull(releaseId)
+      } catch {
+        continue // a blip; keep polling
+      }
+      if (cancelled.current) return
+      if (snap === null) {
+        setError(
+          'The release could not be completed — the DPM database could not be ' +
+            'converted. Nothing was saved; check the DPM file and try again.',
+        )
+        setPhase('idle')
+        return
+      }
+      if (snap.status === 'ready') {
+        navigate(`/releases/${releaseId}`)
+        return
+      }
+      if (snap.status === 'failed') {
+        setError(snap.error ?? 'The release could not be completed.')
+        setPhase('idle')
+        return
+      }
+      // still `ingesting` — keep waiting
+    }
+    if (!cancelled.current) {
+      setError(
+        'The release is taking longer than expected to convert. It will appear ' +
+          'in the releases list once it finishes.',
+      )
       setPhase('idle')
     }
   }

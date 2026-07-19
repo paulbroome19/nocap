@@ -87,7 +87,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.reconcile_snapshots_on_startup:
         try:
             with SessionLocal() as db:
+                # Self-heal releases stranded mid-creation by a killed container
+                # (the residue that otherwise blocks re-uploading the same DPM),
+                # then reconcile ready snapshots against what's on disk.
+                cleared = taxonomy_service.clear_incomplete_creations(db)
                 changed = taxonomy_service.verify_all_snapshots(db)
+            if cleared:
+                logger.warning(
+                    "startup: cleared %d incomplete release(s) stranded "
+                    "mid-creation", cleared,
+                )
             if changed:
                 logger.warning("startup: reconciled %d snapshot(s) with disk", changed)
         except Exception:  # noqa: BLE001 — never block startup on this

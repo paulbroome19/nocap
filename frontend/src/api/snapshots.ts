@@ -118,6 +118,19 @@ export async function getSnapshot(id: number): Promise<Snapshot> {
   return res.json()
 }
 
+/**
+ * Fetch a snapshot, returning `null` if it no longer exists (HTTP 404). Used to
+ * poll a release being created: it stays `ingesting` while the DPM converts,
+ * turns `ready` on success, and disappears (404) if the background stage failed
+ * and cleaned itself up. Network blips throw and are retried by the caller.
+ */
+export async function getSnapshotOrNull(id: number): Promise<Snapshot | null> {
+  const res = await fetch(`/api/taxonomy/snapshots/${id}`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json()
+}
+
 /** Delete a release and everything derived from it. Allowed regardless of any
  *  runs that reference it — historical runs are frozen and keep their own copies. */
 export async function deleteRelease(id: number): Promise<void> {

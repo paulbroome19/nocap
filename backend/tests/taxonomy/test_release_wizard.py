@@ -180,8 +180,21 @@ def test_delete_release_removes_everything(db_session: Session) -> None:
 
 
 def test_endpoint_creates_ready_release(
-    client: TestClient, db_session: Session, tmp_path: Path
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The endpoint returns promptly with the release ``ingesting``; the slow
+    conversion + ingestion run in the background, after which it is ``ready``."""
+    from sqlalchemy.orm import sessionmaker
+
+    # The background finalize task opens its own SessionLocal — bind it to the
+    # test engine so it uses this test's database. TestClient runs background
+    # tasks synchronously before the request returns.
+    factory = sessionmaker(bind=db_session.get_bind(), autoflush=False)
+    monkeypatch.setattr(service, "SessionLocal", factory)
+
     # Upload a pre-converted SQLite DPM so the endpoint needs no mdbtools.
     dpm_sqlite = dpm_mini.build(tmp_path / "dpm.sqlite").read_bytes()
     resp = client.post(
@@ -194,13 +207,98 @@ def test_endpoint_creates_ready_release(
         },
     )
     assert resp.status_code == 201, resp.text
-    assert resp.json()["status"] == "ready"
+    # Returned while still converting — a listed release is only ever ``ready``.
+    assert resp.json()["status"] == "ingesting"
     sid = resp.json()["id"]
+
+    # The background task ran (TestClient awaits it): the release is now ready.
+    db_session.expire_all()
+    got = client.get(f"/api/taxonomy/snapshots/{sid}")
+    assert got.status_code == 200
+    assert got.json()["status"] == "ready"
 
     # It is listed (usable), and deletes to 204.
     assert sid in {s["id"] for s in client.get("/api/taxonomy/snapshots").json()}
     assert client.delete(f"/api/taxonomy/snapshots/{sid}").status_code == 204
     assert client.get(f"/api/taxonomy/snapshots/{sid}").status_code == 404
+
+
+# --- residue never blocks a retry: reclaim + startup self-heal --------------
+
+
+def test_stranded_ingesting_is_reclaimed_on_reupload(db_session: Session) -> None:
+    """A creation killed mid-conversion leaves an ``ingesting`` row + checksum.
+    Re-uploading the same DPM must not be rejected as a duplicate: the stranded
+    attempt is reclaimed and a fresh, ready release is created."""
+    # Simulate a stranded attempt: begin (verify + store, status ingesting) but
+    # never finalize — exactly what a killed container leaves behind.
+    stranded = service.begin_release(
+        db_session,
+        regulator_id=eba(db_session).id,
+        version_label="4.2",
+        dpm_bytes=rf.dpm_bytes(),
+        dpm_filename="DPM.accdb",
+        taxonomy_bytes=rf.taxonomy_zip_bytes(),
+        taxonomy_filename="taxo.zip",
+        rules_bytes=rf.rules_bytes(),
+        rules_filename="rules.xlsx",
+    )
+    assert stranded.status is SnapshotStatus.ingesting
+    stranded_id = stranded.id
+
+    # The same DPM again — previously a hard ConflictError; now it goes through.
+    snap = _create(db_session)
+    assert snap.status is SnapshotStatus.ready
+    # Exactly one release survives: the fresh, ready one. The stranded attempt
+    # was reclaimed, not left as residue. (The id may be reused by SQLite.)
+    all_snaps = db_session.query(service.TaxonomySnapshot).all()
+    assert len(all_snaps) == 1
+    assert all_snaps[0].status is SnapshotStatus.ready
+    assert all_snaps[0].id == snap.id
+
+
+def test_usable_duplicate_is_still_rejected(db_session: Session) -> None:
+    """Reclaim only applies to incomplete attempts — a real, ready release with
+    the same DPM is still a genuine duplicate and is rejected."""
+    from app.core.errors import ConflictError
+
+    _create(db_session)  # a ready release with these exact DPM bytes
+    with pytest.raises(ConflictError, match="already uploaded"):
+        _create(db_session)
+
+
+def test_clear_incomplete_creations_purges_stranded_creation(
+    db_session: Session,
+) -> None:
+    """Startup self-heal: a release stranded ``ingesting`` with no ingested
+    rules never reached ready — it is purged entirely (freeing checksum/files)."""
+    stranded = service.begin_release(
+        db_session,
+        regulator_id=eba(db_session).id,
+        version_label="4.2",
+        dpm_bytes=rf.dpm_bytes(),
+        dpm_filename="DPM.accdb",
+        taxonomy_bytes=rf.taxonomy_zip_bytes(),
+        taxonomy_filename="taxo.zip",
+        rules_bytes=rf.rules_bytes(),
+        rules_filename="rules.xlsx",
+    )
+    sid = stranded.id
+
+    cleared = service.clear_incomplete_creations(db_session)
+    assert cleared == 1
+    assert db_session.get(service.TaxonomySnapshot, sid) is None
+    _assert_nothing_persisted(db_session)
+
+
+def test_clear_incomplete_creations_spares_a_ready_release(
+    db_session: Session,
+) -> None:
+    """A ready release is untouched by the startup self-heal."""
+    snap = _create(db_session)
+    assert service.clear_incomplete_creations(db_session) == 0
+    assert db_session.get(service.TaxonomySnapshot, snap.id) is not None
+    assert snap.status is SnapshotStatus.ready
 
 
 def test_endpoint_rejects_bad_dpm(client: TestClient, db_session: Session) -> None:
