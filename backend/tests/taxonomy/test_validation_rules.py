@@ -164,6 +164,51 @@ def test_ingest_missing_file_fails_slot(
     assert artifact.error
 
 
+# --- register view: module + framework scoping -----------------------------
+
+
+def test_register_view_scopes_to_module(
+    db_session: Session, ready_release: TaxonomySnapshot
+) -> None:
+    """A COREP_LCR_DA run at framework 4.2 sees only COREP_LCR_DA_4.2 rules —
+    the COREP_OF rule (v30000) is out of scope, not merely deactivated."""
+    _ingest(db_session, ready_release)
+    view = rules.build_register_view(
+        db_session, ready_release.id, fx.D_CURRENT,
+        module_code="COREP_LCR_DA", framework_version="4.2",
+    )
+    assert "v10000_m" in view.descriptions
+    assert "v30000_m" not in view.descriptions
+    assert "v30000_m" not in view.deactivated_codes
+    # Applicable = active, covering, in-scope: v10000_m, v10001_m, e10002_e.
+    # (v20000_m inactive, v40000_m future-dated.)
+    assert view.applicable_count == 3
+
+
+def test_register_view_scoping_excludes_wrong_framework(
+    db_session: Session, ready_release: TaxonomySnapshot
+) -> None:
+    """Framework scoping keeps a module's own version: COREP_OF at framework 4.2
+    matches COREP_OF_4.2 (v30000 new), not the COREP_OF_4.0 window."""
+    _ingest(db_session, ready_release)
+    view = rules.build_register_view(
+        db_session, ready_release.id, fx.D_CURRENT,
+        module_code="COREP_OF", framework_version="4.2",
+    )
+    assert view.descriptions.get("v30000_m") == "v30000 new (4.2)"
+    # COREP_LCR_DA rules are a different module → out of scope.
+    assert "v10000_m" not in view.descriptions
+
+
+def test_register_view_unscoped_keeps_all(
+    db_session: Session, ready_release: TaxonomySnapshot
+) -> None:
+    """Without a module scope (legacy runs) every rule is still considered."""
+    _ingest(db_session, ready_release)
+    view = rules.build_register_view(db_session, ready_release.id, fx.D_CURRENT)
+    assert "v10000_m" in view.descriptions and "v30000_m" in view.descriptions
+
+
 # --- register view: descriptions + date-range deactivation -----------------
 
 

@@ -43,9 +43,12 @@ def _release(db: Session, code: str, modules) -> TaxonomySnapshot:
 @pytest.fixture
 def three_releases(db_session: Session):
     """EBA 4.2, 4.2.1, 4.2.2 — LCR unchanged, FINREP9 bumped each release."""
-    s42 = _release(db_session, "4.2", [_LCR, ("FINREP9", "FINREP", "3.4.0", "Finrep")])
-    s421 = _release(db_session, "4.2.1", [_LCR, ("FINREP9", "FINREP", "3.4.1", "Finrep")])
-    s422 = _release(db_session, "4.2.2", [_LCR, ("FINREP9", "FINREP", "3.4.2", "Finrep")])
+    def fin(v):
+        return ("FINREP9", "FINREP", v, "Finrep")
+
+    s42 = _release(db_session, "4.2", [_LCR, fin("3.4.0")])
+    s421 = _release(db_session, "4.2.1", [_LCR, fin("3.4.1")])
+    s422 = _release(db_session, "4.2.2", [_LCR, fin("3.4.2")])
     return s42, s421, s422
 
 

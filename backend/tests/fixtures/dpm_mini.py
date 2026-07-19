@@ -52,7 +52,10 @@ CREATE TABLE Context (ContextID INTEGER PRIMARY KEY, Signature TEXT);
 """
 
 _ROWS = {
-    "Release": [(1, 0, "1.0"), (2, -1, "2.0")],
+    # Real EBA framework release codes: current is 4.2 (framework version 4.2),
+    # so a run's framework version matches the mini validation-rules tokens
+    # (COREP_LCR_DA_4.2) and rule scoping is exercised end-to-end.
+    "Release": [(1, 0, "4.1"), (2, -1, "4.2")],
     "Framework": [(1, "COREP", "Common Reporting")],
     "Module": [(1, 1)],
     "ModuleVersion": [

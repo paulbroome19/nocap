@@ -174,6 +174,12 @@ class RunOut(BaseModel):
     failure_details: list | None
     # The release capability set captured when the run was created.
     capabilities: dict | None
+    # The taxonomy version the run was executed against, frozen at creation.
+    module_version: str | None
+    framework_version: str | None
+    # The validation-rule set applied, frozen when validation ran: {count,
+    # module_code, module_version, framework_version, reference_date}.
+    rule_scope: dict | None
     created_at: datetime
 
 
