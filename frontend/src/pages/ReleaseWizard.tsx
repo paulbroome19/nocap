@@ -1,32 +1,40 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import {
-  createRelease,
-  getRegulator,
-  type Regulator,
-} from '../api/snapshots'
+import { createRelease, getRegulator, type Regulator } from '../api/snapshots'
 import UploadZone from '../components/UploadZone'
-import { Card, PageHeader, fieldClass, primaryBtn } from '../components/ui'
+import {
+  Block,
+  ErrorText,
+  FieldLabel,
+  PageHeader,
+  SectionLabel,
+  fieldClass,
+  primaryBtn,
+} from '../components/ui'
 
-// The three mandatory artifacts, named in EBA-website terms.
+// The three mandatory artifacts, in the regulator's own page order and
+// vocabulary, each warning about the file it is easily confused with.
 const SLOTS = [
+  {
+    key: 'rules' as const,
+    label: 'Validation rules',
+    accept: '.xlsx',
+    hint: 'xlsx',
+    warn: 'The “Validation rules” workbook the regulator publishes — not a filing-rules PDF.',
+  },
   {
     key: 'dpm' as const,
     label: 'DPM database',
     accept: '.accdb,.mdb,.sqlite,.sqlite3,.db',
-    hint: 'EBA “DPM 2.0” Access database · .accdb (or a pre-converted .sqlite)',
+    hint: 'accdb',
+    warn: 'The DPM 2.0 database — not the older DPM 1.0. A pre-converted .sqlite is accepted in its place.',
   },
   {
     key: 'taxonomy' as const,
     label: 'Taxonomy package',
     accept: '.zip',
-    hint: 'EBA “Reporting frameworks” taxonomy package · .zip',
-  },
-  {
-    key: 'rules' as const,
-    label: 'Validation rules',
-    accept: '.xlsx',
-    hint: 'EBA “Validation rules” workbook · .xlsx',
+    hint: 'zip',
+    warn: 'The “Taxonomy package” zip — not the much larger “Full taxonomy”.',
   },
 ]
 
@@ -70,11 +78,9 @@ export default function ReleaseWizard() {
           if (f >= 1) setPhase('creating')
         },
       )
-      // Fully created: verified, converted, and rules ingested — it's ready.
       navigate(`/releases/${release.id}`)
     } catch (e) {
-      // A verification failure: nothing was created; keep the files so the
-      // reporter can swap the one that was wrong.
+      // Nothing was created; keep the files so the wrong one can be swapped.
       setError(e instanceof Error ? e.message : String(e))
       setPhase('idle')
     }
@@ -85,21 +91,17 @@ export default function ReleaseWizard() {
       <PageHeader
         crumbs={[
           { label: 'Taxonomies', to: '/releases' },
-          {
-            label: regulator?.name ?? '',
-            to: `/releases/regulators/${id}`,
-          },
+          { label: regulator?.name ?? '', to: `/releases/regulators/${id}` },
           { label: 'New release' },
         ]}
-        title="New taxonomy release"
-        subtitle="All three files are required. Each is checked on arrival; the release is created only if all three are valid."
+        title="New release"
+        subtitle="All three published files are required. Each is checked as it arrives; the release is created only once every one is valid — a failure leaves nothing behind."
       />
 
-      <Card className="space-y-5 p-6">
-        <label className="flex max-w-xs flex-col gap-1">
-          <span className="text-xs font-medium text-slate-600">
-            Version label
-          </span>
+      <SectionLabel>Release files</SectionLabel>
+      <Block className="space-y-6 p-6">
+        <label className="block max-w-xs">
+          <FieldLabel>Version label</FieldLabel>
           <input
             type="text"
             value={versionLabel}
@@ -110,12 +112,13 @@ export default function ReleaseWizard() {
           />
         </label>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="space-y-5">
           {SLOTS.map((s) => (
-            <div key={s.key} className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-slate-700">
-                {s.label}
-              </span>
+            <div key={s.key} className="grid gap-4 sm:grid-cols-[1fr_1.4fr] sm:items-center">
+              <div>
+                <div className="text-[15px] font-semibold text-ink">{s.label}</div>
+                <p className="mt-1 text-[12.5px] text-sub">{s.warn}</p>
+              </div>
               <UploadZone
                 accept={s.accept}
                 hint={s.hint}
@@ -127,40 +130,23 @@ export default function ReleaseWizard() {
           ))}
         </div>
 
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+        {error && <ErrorText>{error}</ErrorText>}
 
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => void handleCreate()}
-            disabled={!ready}
-            className={primaryBtn}
-          >
-            Create release
+        <div className="flex items-center gap-4 pt-1">
+          <button type="button" onClick={() => void handleCreate()} disabled={!ready} className={primaryBtn}>
+            Create
           </button>
           {phase === 'uploading' && (
-            <span className="text-sm text-slate-500">
-              Uploading… {Math.round(progress * 100)}%
-            </span>
+            <span className="text-[13px] text-sub">Uploading… {Math.round(progress * 100)}%</span>
           )}
           {phase === 'creating' && (
-            <span className="text-sm text-slate-500">
-              Converting the DPM database and ingesting rules… this can take a
-              minute.
+            <span className="text-[13px] text-sub">
+              Verifying the files, converting the DPM database, and ingesting the
+              rules… this can take a minute.
             </span>
           )}
         </div>
-        {phase === 'idle' && !error && (
-          <p className="text-xs text-slate-400">
-            After the files verify, the DPM database converts in the background —
-            this takes a few minutes.
-          </p>
-        )}
-      </Card>
+      </Block>
     </section>
   )
 }
