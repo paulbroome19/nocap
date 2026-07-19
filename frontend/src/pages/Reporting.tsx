@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { listRegulators, type Regulator } from '../api/snapshots'
-import { Card, ErrorText, RowLink, TableSkeleton } from '../components/ui'
+import {
+  Block,
+  EmptyState,
+  ErrorText,
+  PageHeader,
+  RowLink,
+  SectionLabel,
+  TableSkeleton,
+} from '../components/ui'
 
 export default function Reporting() {
   const [regulators, setRegulators] = useState<Regulator[] | null>(null)
@@ -14,16 +22,16 @@ export default function Reporting() {
 
   return (
     <section>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight text-slate-900">
-        Reporting
-      </h1>
-
+      <PageHeader title="Reporting" />
       <ErrorText>{error}</ErrorText>
 
+      <SectionLabel>Regulator</SectionLabel>
       {regulators === null && !error ? (
-        <TableSkeleton rows={2} />
+        <TableSkeleton rows={1} />
+      ) : regulators && regulators.length === 0 ? (
+        <EmptyState>No regulators are set up yet.</EmptyState>
       ) : (
-        <Card className="divide-y divide-slate-100">
+        <Block>
           {(regulators ?? []).map((r) => (
             <RowLink
               key={r.id}
@@ -32,7 +40,7 @@ export default function Reporting() {
               subtitle={r.code}
             />
           ))}
-        </Card>
+        </Block>
       )}
     </section>
   )

@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { listRegulators, type Regulator } from '../api/snapshots'
 import { listCategories, type Category } from '../api/workflows'
-import { Card, ErrorText, PageHeader, RowLink, TableSkeleton } from '../components/ui'
+import {
+  Block,
+  EmptyState,
+  ErrorText,
+  PageHeader,
+  RowLink,
+  SectionLabel,
+  TableSkeleton,
+} from '../components/ui'
+import { byCategoryOrder } from '../lib/categories'
 
 export default function RegulatorReporting() {
   const { regulatorCode = '' } = useParams()
@@ -19,27 +28,31 @@ export default function RegulatorReporting() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [regulatorCode])
 
+  const ordered = byCategoryOrder(categories ?? [], (c) => c.category)
+
   return (
     <section>
       <PageHeader
-        crumbs={[{ label: 'Reporting', to: '/reporting' }, { label: regulatorCode }]}
+        crumbs={[{ label: 'Reporting', to: '/reporting' }, { label: regulator?.name ?? regulatorCode }]}
         title={regulator?.name ?? regulatorCode}
       />
-
       <ErrorText>{error}</ErrorText>
 
+      <SectionLabel>Category</SectionLabel>
       {categories === null && !error ? (
         <TableSkeleton rows={4} />
+      ) : categories && categories.length === 0 ? (
+        <EmptyState>No reporting categories are active yet.</EmptyState>
       ) : (
-        <Card className="divide-y divide-slate-100">
-          {(categories ?? []).map((c) => (
+        <Block>
+          {ordered.map((c) => (
             <RowLink
               key={c.category}
               to={`/reporting/${regulatorCode}/${encodeURIComponent(c.category)}`}
               title={c.category}
             />
           ))}
-        </Card>
+        </Block>
       )}
     </section>
   )
