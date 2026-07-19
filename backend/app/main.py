@@ -11,6 +11,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.staticfiles import StaticFiles
 
 from app.comparison.router import router as comparison_router
 from app.core.config import get_settings
@@ -27,6 +30,43 @@ from app.validation.router import router as validation_router
 from app.workflows.router import router as workflows_router
 
 logger = logging.getLogger(__name__)
+
+
+class _SPAStaticFiles(StaticFiles):
+    """Static files with single-page-app fallback.
+
+    Serves built assets normally; for any path that doesn't map to a file (a
+    client-side route like ``/releases/5`` opened directly or refreshed) it
+    returns ``index.html`` so the router can take over. Real missing assets
+    (e.g. a stale ``/assets/*.js``) still 404.
+    """
+
+    async def get_response(self, path: str, scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # A missing file: for a client-side route (anything but a real asset)
+            # serve index.html so the SPA router can render it. A genuinely
+            # missing asset still 404s.
+            if exc.status_code == 404 and not path.startswith("assets/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
+def _mount_frontend(app: FastAPI, static_dir) -> None:
+    """Serve the built SPA at ``/`` when a build is present (skipped in dev).
+
+    Mounted after the API routers so ``/api/*`` and ``/health`` win; everything
+    else falls through to the static build with SPA fallback.
+    """
+    index = static_dir / "index.html"
+    if not index.is_file():
+        logger.info("no frontend build at %s; static serving disabled", static_dir)
+        return
+    app.mount(
+        "/", _SPAStaticFiles(directory=str(static_dir), html=True), name="spa"
+    )
+    logger.info("serving frontend build from %s", static_dir)
 
 
 @asynccontextmanager
@@ -97,6 +137,9 @@ def create_app() -> FastAPI:
     app.include_router(
         workflows_router, prefix="/api/workflows", tags=["workflows"]
     )
+
+    # Serve the built frontend last so the API surface takes precedence.
+    _mount_frontend(app, settings.static_dir)
 
     return app
 

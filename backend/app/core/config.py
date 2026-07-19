@@ -36,9 +36,22 @@ class Settings(BaseSettings):
     default_country: str = "XX"
 
     # SQLAlchemy 2.x + psycopg (v3) driver against local Postgres by default.
+    # A managed provider (e.g. Railway) hands out a plain ``postgresql://`` (or
+    # ``postgres://``) URL; SQLAlchemy would then reach for psycopg2, which we do
+    # not install. The validator below rewrites those to the psycopg v3 driver so
+    # the provider's DATABASE_URL works verbatim, no secret rewriting required.
     database_url: str = (
         "postgresql+psycopg://postgres:postgres@localhost:5432/nocap"
     )
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalize_database_url(cls, value: str) -> str:
+        for prefix in ("postgresql://", "postgres://"):
+            if value.startswith(prefix):
+                rest = value[len(prefix):]
+                return f"postgresql+psycopg://{rest}"
+        return value
 
     log_level: str = "INFO"
 
@@ -52,6 +65,20 @@ class Settings(BaseSettings):
     @field_validator("data_dir")
     @classmethod
     def _resolve_data_dir(cls, value: Path) -> Path:
+        value = Path(value).expanduser()
+        if not value.is_absolute():
+            value = _BACKEND_DIR / value
+        return value.resolve()
+
+    # Built frontend (Vite ``dist``) to serve as static files so one service
+    # hosts the whole app. Defaults to ``frontend/dist`` beside the backend; the
+    # container sets STATIC_DIR to wherever the build was copied. When the dir is
+    # absent (local dev with the Vite dev server), static serving is skipped.
+    static_dir: Path = _BACKEND_DIR.parent / "frontend" / "dist"
+
+    @field_validator("static_dir")
+    @classmethod
+    def _resolve_static_dir(cls, value: Path) -> Path:
         value = Path(value).expanduser()
         if not value.is_absolute():
             value = _BACKEND_DIR / value
