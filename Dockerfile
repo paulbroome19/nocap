@@ -1,4 +1,4 @@
-# NoCap — single-service image: FastAPI (uvicorn) serves the API *and* the
+# Carter — single-service image: FastAPI (uvicorn) serves the API *and* the
 # built React SPA as static files. One container, one volume, no CORS.
 #
 # Why one service (not two): the frontend already calls the API on relative

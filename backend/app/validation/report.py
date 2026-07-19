@@ -105,7 +105,7 @@ def build_report_html(
 <html lang=en>
 <head>
 <meta charset=utf-8>
-<title>NoCap Validation Report</title>
+<title>Carter Validation Report</title>
 <style>
   body {{ font: 14px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
     color: #0f172a; max-width: 1000px; margin: 2rem auto; padding: 0 1.5rem; }}
@@ -133,7 +133,7 @@ def build_report_html(
 </style>
 </head>
 <body>
-<h1>NoCap — Validation Report</h1>
+<h1>Carter — Validation Report</h1>
 <p><span class="banner {verdict_cls}">{escape(verdict)}</span>
   &nbsp; {failed} failed, {warned} warning(s), {len(register)} rules</p>{scope_html}
 

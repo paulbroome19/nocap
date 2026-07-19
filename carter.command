@@ -6,7 +6,7 @@
 # Carter. It just points at the repo and runs run-carter.sh; edit CARTER_REPO
 # below if you move the repository.
 #
-CARTER_REPO="/Users/paulbroome/Desktop/Dev/NOCAP"
+CARTER_REPO="/Users/paulbroome/Desktop/Dev/Carter"
 
 if [ ! -x "${CARTER_REPO}/run-carter.sh" ]; then
   echo "Carter isn't where this launcher expects it:"

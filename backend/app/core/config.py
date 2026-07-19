@@ -27,7 +27,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "NoCap"
+    app_name: str = "Carter"
     environment: str = "development"
     debug: bool = False
 
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # not install. The validator below rewrites those to the psycopg v3 driver so
     # the provider's DATABASE_URL works verbatim, no secret rewriting required.
     database_url: str = (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/nocap"
+        "postgresql+psycopg://postgres:postgres@localhost:5432/carter"
     )
 
     @field_validator("database_url")

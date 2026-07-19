@@ -1,4 +1,4 @@
-# NoCap — Product Contract
+# Carter — Product Contract
 
 This document defines how the system must **behave**. CLAUDE.md defines how it is
 **built**. Where they disagree, this document wins on behaviour and CLAUDE.md wins

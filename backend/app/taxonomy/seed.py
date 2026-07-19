@@ -20,7 +20,7 @@ from app.taxonomy.models import Regulator
 
 logger = logging.getLogger(__name__)
 
-# (code, name) — publishers of the taxonomies NoCap ingests.
+# (code, name) — publishers of the taxonomies Carter ingests.
 REGULATOR_SEED: list[tuple[str, str]] = [
     ("EBA", "European Banking Authority"),
 ]

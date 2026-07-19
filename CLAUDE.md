@@ -1,4 +1,4 @@
-# NoCap — EBA xBRL-CSV Submission Platform
+# Carter — EBA xBRL-CSV Submission Platform
 
 ## What this is
 
@@ -49,7 +49,7 @@ surface must be checked against PRODUCT.md, not just against these engineering r
 ## Repo structure
 
 ```
-nocap/
+carter/
 ├── backend/
 │   ├── app/
 │   │   ├── core/            # config, db session, logging, errors — NO business logic
