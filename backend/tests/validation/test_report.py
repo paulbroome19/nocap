@@ -87,12 +87,18 @@ def test_report_html_mirrors_register_and_formula_note() -> None:
         register=register,
         formula=formula,
     )
-    assert "Rule register" in html
+    # Three sections by rule family (severity never sections).
+    assert "Formula validations" in html or "Formula:" in html
+    assert "Filing &amp; structural checks" in html or "Structural:" in html
+    assert "Informational" in html
     assert "FR 1.7.1" in html  # a structural rule id
     assert "v16053_m" in html  # a formula rule id
     assert "UNRESOLVED_FACT message" in html
     assert "Not submittable" in html  # has a FAILED row
+    # Explicit formula counts + per-section headline + a severity badge.
     assert "100 rules loaded, 2 evaluated" in html
+    assert "Formula:" in html and "Structural:" in html
+    assert "Blocking" in html  # severity badge on the blocking structural row
     assert "v6272_m" in html  # deactivated note
 
 
@@ -102,3 +108,19 @@ def test_report_html_formula_not_run() -> None:
     )
     assert "has not run" in html
     assert "Submittable" in html  # no failed rows
+
+
+def test_report_formula_section_never_green_when_zero_evaluated() -> None:
+    # Formula ran but evaluated nothing → the section says so loudly, never an
+    # implied green pass.
+    formula = {
+        "status": "executed", "loaded": 500, "evaluated": 0,
+        "satisfied": 0, "unsatisfied": 0, "rules": [], "deactivated": [],
+        "note": None,
+    }
+    html = build_report_html(
+        identity=[("Run", "#7")], register=build_register([], formula),
+        formula=formula,
+    )
+    assert "evaluated 0 rules" in html
+    assert "not a pass" in html

@@ -1276,6 +1276,57 @@ def _finalise_status(db: Session, run: Run) -> None:
     db.commit()
 
 
+def _formula_completion_finding(
+    *,
+    evaluated: int,
+    scoped_count: int,
+    package_present: bool,
+    note: str | None,
+) -> Finding | None:
+    """Whether EBA formula validation actually ran to completion (NC-S19).
+
+    Returns the structural finding to record against NC-S19, or ``None`` when
+    formula validation evaluated at least one rule (NC-S19 then passes silently
+    — it is only ever green when Arelle evaluated a rule to completion).
+
+    A taxonomy package *and* scoped rules but zero evaluated rules is a
+    **blocking** failure — formula validation silently did not run — and names
+    the likely cause. Any other zero-evaluated case (no package, no applicable
+    rules, feature disabled) is a non-blocking note, so an empty formula section
+    is never rendered green. The phase is structural (``post_generation``) so the
+    finding surfaces as the NC-S19 register row rather than a formula-rule row.
+    """
+    if evaluated > 0:
+        return None
+    if package_present and scoped_count > 0:
+        cause = note or (
+            "the taxonomy package likely omits the formula (assertion) linkbase "
+            "for this module's entry point, or its version does not match the "
+            "reporting module — check the release's taxonomy package matches the "
+            "reporting module"
+        )
+        return Finding(
+            severity=Severity.error,
+            phase=ValidationPhase.post_generation,
+            code="FORMULA_VALIDATION_UNAVAILABLE",
+            message=(
+                f"formula validation evaluated none of the {scoped_count:,} "
+                "applicable rules for this run — it did not run to completion. "
+                f"Likely cause: {cause}."
+            ),
+        )
+    return Finding(
+        severity=Severity.info,
+        phase=ValidationPhase.post_generation,
+        code="FORMULA_VALIDATION_UNAVAILABLE",
+        message=note
+        or (
+            "formula validation did not run — this release has no taxonomy "
+            "package, so no formula rules were evaluated"
+        ),
+    )
+
+
 def _plural(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
@@ -1612,6 +1663,29 @@ def execute_run(
                 run.id, extra={"run_id": run.id},
             )
         else:
+            # Formula validation will not run (feature disabled, or the release
+            # has no taxonomy package). Record NC-S19 honestly so the register
+            # never shows it green, and give the report/screen a formula summary
+            # to read rather than a bare "has not run".
+            reason = (
+                "formula validation is disabled for this deployment"
+                if not settings.arelle_enabled
+                else "this release has no taxonomy package, so no formula rules "
+                "were evaluated"
+            )
+            run.formula_summary = {
+                "status": "unavailable", "loaded": 0, "evaluated": 0,
+                "satisfied": 0, "unsatisfied": 0, "rules": [],
+                "deactivated": [], "note": reason,
+            }
+            guard = _formula_completion_finding(
+                evaluated=0, scoped_count=0, package_present=False, note=reason,
+            )
+            if guard is not None:
+                _append_findings(db, run.id, [guard])
+            _write_validation_report(
+                db, run, wf, package.filename, settings=settings
+            )
             _finalise_status(db, run)
             logger.info(
                 "run id=%s %s (%d findings)", run.id, run.status.value,
@@ -1789,6 +1863,23 @@ def run_formula_validation_task(run_id: int) -> None:
         run.formula_summary = _build_formula_summary(result, severities)
         if rule_scope is not None:
             run.rule_scope = rule_scope
+
+        # Completion guard (NC-S19): a taxonomy package + scoped rules but zero
+        # evaluated rules means formula validation silently did not run — a loud
+        # blocking failure, not a clean pass. Replace the adapter's provisional
+        # unavailable note with the authoritative completion finding.
+        findings = [
+            f for f in findings if f.code != "FORMULA_VALIDATION_UNAVAILABLE"
+        ]
+        guard = _formula_completion_finding(
+            evaluated=run.formula_summary.get("evaluated", 0),
+            scoped_count=(rule_scope or {}).get("count", 0),
+            package_present=bool(taxo),
+            note=run.formula_summary.get("note"),
+        )
+        if guard is not None:
+            findings.append(guard)
+
         _append_findings(db, run.id, findings)
         _write_validation_report(
             db, run, wf, outputs[-1].filename, settings=settings
