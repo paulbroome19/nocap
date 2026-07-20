@@ -26,7 +26,9 @@ PG_IMAGE=postgres:16
 PG_PORT="${CARTER_PG_PORT:-55432}"
 PG_USER=postgres
 PG_PASSWORD=postgres
-PG_DB=carter
+# Local DB keeps its pre-rename name so existing data stays reachable (the
+# project rename to Carter doesn't migrate the local database).
+PG_DB=nocap
 PG_VOLUME=carter-pgdata
 APP_URL="http://localhost:${FRONTEND_PORT}"
 

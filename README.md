@@ -54,11 +54,12 @@ fine), and [`mdbtools`](https://github.com/mdbtools/mdbtools) (`brew install
 mdbtools`) — used to convert the EBA DPM Access release to SQLite on ingest.
 
 **Postgres** — any local instance works; the backend defaults to
-`postgresql+psycopg://postgres:postgres@localhost:5432/carter`. With Docker:
+`postgresql+psycopg://postgres:postgres@localhost:5432/nocap` (the DB keeps its
+pre-rename name so existing local data stays reachable). With Docker:
 
 ```bash
-docker run -d --name carter-pg -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=carter -p 5432:5432 postgres:16
+docker run -d --name nocap-pg -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=nocap -p 5432:5432 postgres:16
 ```
 
 **Backend** (FastAPI, from `backend/`):

@@ -40,8 +40,13 @@ class Settings(BaseSettings):
     # ``postgres://``) URL; SQLAlchemy would then reach for psycopg2, which we do
     # not install. The validator below rewrites those to the psycopg v3 driver so
     # the provider's DATABASE_URL works verbatim, no secret rewriting required.
+    # Local-dev database name stays ``nocap`` (the project's pre-rename name):
+    # existing local databases hold their data there, and this default only ever
+    # applies to local dev — a managed provider (Railway) supplies its own
+    # DATABASE_URL (its DB is named ``railway``), so this value never reaches
+    # production.
     database_url: str = (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/carter"
+        "postgresql+psycopg://postgres:postgres@localhost:5432/nocap"
     )
 
     @field_validator("database_url")

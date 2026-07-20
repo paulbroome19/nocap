@@ -176,7 +176,7 @@ On the public URL:
 ```bash
 docker build -t carter:local .
 docker run --rm -p 8000:8000 \
-  -e DATABASE_URL="postgresql://user:pass@host:5432/carter" \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/nocap" \
   -v carter-data:/data \
   carter:local
 # open http://localhost:8000
