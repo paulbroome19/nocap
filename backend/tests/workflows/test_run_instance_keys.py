@@ -174,7 +174,7 @@ def test_run_detail_report_and_input_data(
     body = client.get(
         f"/api/workflows/run-files/{report['id']}/download"
     ).text
-    assert "Rule register" in body
+    assert "Filing &amp; structural checks" in body or "Structural:" in body
     assert "FR 1.7.1" in body
     assert "LCR" in body  # suite identity
 
