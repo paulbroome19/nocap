@@ -1,9 +1,15 @@
-# Deploying NoCap to Railway
+# Deploying Carter to Railway
 
-NoCap deploys as a **single Railway service** built from the repo `Dockerfile`,
+Carter deploys as a **single Railway service** built from the repo `Dockerfile`,
 backed by a **Railway Postgres** database and a **persistent volume**. The one
 container runs FastAPI (uvicorn), which serves both the `/api` surface and the
 built React SPA as static files.
+
+> **Naming note.** The live Railway service, volume, and generated domain are
+> named `nocap`/`nocap-production…` from before the rename to Carter; they are
+> deliberately left as-is (renaming the service would change the public URL).
+> References to `nocap` below that name the *deployed Railway resources* are
+> correct; the product itself is Carter.
 
 - **Why one service, not two.** The frontend calls the API on relative `/api`
   paths, so same-origin serving removes CORS entirely. The app needs a single
@@ -85,7 +91,7 @@ is also authenticated on this machine for the migration/verification steps.)
 2. Name the project e.g. **nocap**. You now have a `Postgres` service.
 
 ### Step B — Add the app service from the repo
-3. In the project → **+ New → GitHub Repo** → select the NoCap repo →
+3. In the project → **+ New → GitHub Repo** → select the Carter repo →
    branch **`feat/deployment`**.
 4. Railway detects the root `Dockerfile` and `railway.json` and starts a build.
    Let the first build finish (it may fail to boot until the volume + DB are set
@@ -168,11 +174,11 @@ On the public URL:
 ## 6. Running the image locally (optional smoke test)
 
 ```bash
-docker build -t nocap:local .
+docker build -t carter:local .
 docker run --rm -p 8000:8000 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/nocap" \
-  -v nocap-data:/data \
-  nocap:local
+  -v carter-data:/data \
+  carter:local
 # open http://localhost:8000
 ```
 

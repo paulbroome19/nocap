@@ -10,4 +10,4 @@ def test_health_ok(client: TestClient) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["app"] == "NoCap"
+    assert body["app"] == "Carter"

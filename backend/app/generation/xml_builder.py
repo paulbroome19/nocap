@@ -227,7 +227,7 @@ def _render(resolved: list[_Resolved], md: PackageMetadata, currency: str) -> st
         else ref_date
     )
     lines.append(
-        f'<?instance-generator id="nocap" version="0.1.0" '
+        f'<?instance-generator id="carter" version="0.1.0" '
         f'creationdate="{created}"?>'
     )
     ns_attrs = " ".join(

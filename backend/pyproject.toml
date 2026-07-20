@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nocap-backend"
+name = "carter-backend"
 version = "0.1.0"
-description = "NoCap — EBA xBRL-CSV submission platform (backend)"
+description = "Carter — EBA xBRL-CSV submission platform (backend)"
 requires-python = ">=3.12"
 dependencies = [
     "arelle-release>=2.42",

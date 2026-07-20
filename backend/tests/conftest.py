@@ -31,7 +31,7 @@ def _data_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     Per-test (not per-session): snapshot ids reset with the fresh app DB every
     test, so a shared data dir would collide on ``snapshots/1``.
     """
-    d = tmp_path_factory.mktemp("nocap-data")
+    d = tmp_path_factory.mktemp("carter-data")
     os.environ["DATA_DIR"] = str(d)
     # The startup reconcile uses the app's own engine (real Postgres); keep tests
     # hermetic by disabling it — verify_all_snapshots is unit-tested directly.

@@ -1,6 +1,6 @@
-# NoCap
+# Carter
 
-NoCap is a web application for producing EBA regulatory submissions. It ingests EBA DPM
+Carter is a web application for producing EBA regulatory submissions. It ingests EBA DPM
 taxonomy releases as immutable versioned snapshots, accepts fact data as XLSX, and
 generates submission-ready xBRL-CSV packages (zip) with a validation report — replacing an
 external vendor for the EBA filing workflow (v1 target: COREP LCR, end to end).
@@ -54,7 +54,8 @@ fine), and [`mdbtools`](https://github.com/mdbtools/mdbtools) (`brew install
 mdbtools`) — used to convert the EBA DPM Access release to SQLite on ingest.
 
 **Postgres** — any local instance works; the backend defaults to
-`postgresql+psycopg://postgres:postgres@localhost:5432/nocap`. With Docker:
+`postgresql+psycopg://postgres:postgres@localhost:5432/nocap` (the DB keeps its
+pre-rename name so existing local data stays reachable). With Docker:
 
 ```bash
 docker run -d --name nocap-pg -e POSTGRES_PASSWORD=postgres \

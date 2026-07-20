@@ -811,7 +811,7 @@ def build_report_text(
     warnings = [f for f in findings if f.severity is Severity.warning]
     infos = [f for f in findings if f.severity is Severity.info]
 
-    lines = ["NoCap — Validation Report", "=" * 60, *header_lines, ""]
+    lines = ["Carter — Validation Report", "=" * 60, *header_lines, ""]
     verdict = "FAILED VALIDATION — NOT SUBMITTABLE" if errors else "OK"
     lines.append(
         f"Result: {verdict}  "

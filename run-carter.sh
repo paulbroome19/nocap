@@ -26,6 +26,8 @@ PG_IMAGE=postgres:16
 PG_PORT="${CARTER_PG_PORT:-55432}"
 PG_USER=postgres
 PG_PASSWORD=postgres
+# Local DB keeps its pre-rename name so existing data stays reachable (the
+# project rename to Carter doesn't migrate the local database).
 PG_DB=nocap
 PG_VOLUME=carter-pgdata
 APP_URL="http://localhost:${FRONTEND_PORT}"
@@ -159,8 +161,17 @@ start_postgres() {
 
   printf '%s' "  waiting for Postgres to accept connections"
   for _ in $(seq 1 60); do
-    if docker exec "$PG_CONTAINER" pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; then
-      printf '\n'; ok "Postgres is ready."; return 0
+    if docker exec "$PG_CONTAINER" pg_isready -U "$PG_USER" >/dev/null 2>&1; then
+      printf '\n'; ok "Postgres is ready."
+      # POSTGRES_DB only creates the database on a *fresh* container init. If the
+      # container predates this database name (e.g. after a rename), create it
+      # once here so migrations have something to connect to.
+      if ! docker exec "$PG_CONTAINER" psql -U "$PG_USER" -tAc \
+           "SELECT 1 FROM pg_database WHERE datname='${PG_DB}'" | grep -q 1; then
+        docker exec "$PG_CONTAINER" createdb -U "$PG_USER" "$PG_DB" \
+          && ok "Created database '${PG_DB}'."
+      fi
+      return 0
     fi
     printf '.'; sleep 1
   done
