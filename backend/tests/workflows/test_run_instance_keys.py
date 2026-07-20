@@ -163,8 +163,10 @@ def test_run_detail_report_and_input_data(
     assert {r["result"] for r in register} <= {"PASSED", "NOTE"}
     ids = {r["id"] for r in register}
     assert "FR 1.7.1" in ids and any(i.startswith("NC-S") for i in ids)
-    # Arelle is disabled in tests -> formula never ran.
-    assert detail["formula_summary"] is None
+    # Arelle is disabled in tests -> formula never ran, recorded honestly as an
+    # unavailable summary (so the screen/report never imply a green formula pass).
+    assert detail["formula_summary"]["status"] == "unavailable"
+    assert detail["formula_summary"]["evaluated"] == 0
 
     # The report is a substantive HTML document mirroring the register.
     report = next(f for f in detail["files"] if f["role"] == "validation_report")

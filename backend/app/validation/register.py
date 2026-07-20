@@ -202,9 +202,12 @@ STRUCTURAL_CHECKS: tuple[StructuralCheck, ...] = (
     ),
     StructuralCheck(
         "FORMULA_VALIDATION_UNAVAILABLE", "NC-S19",
-        "Formula validation available for this release",
-        "EBA formula validation could not run — usually because the release has "
-        "no taxonomy package — so formula rules were not evaluated.",
+        "Formula validation ran and evaluated the applicable rules",
+        "EBA formula validation must load the release's taxonomy package and "
+        "evaluate the applicable formula rules. It passes only when Arelle "
+        "evaluated at least one rule to completion; evaluating zero rules while a "
+        "taxonomy package and scoped rules both exist is a blocking failure, not "
+        "a pass.",
         "Formula",
     ),
     # --- xBRL-XML instance checks (docs/xml-notes.md §9) --------------------

@@ -83,8 +83,12 @@ def test_full_run_derived_is_clean(
 
     findings = service.list_findings(db_session, run.id)
     assert not [f for f in findings if f.severity is Severity.error]
-    assert [f.code for f in findings if f.severity is Severity.info] == [
-        "ENTRY_POINT_UNVERIFIED"
+    # No taxonomy package in the test fixture, so formula validation cannot run:
+    # NC-S19 is recorded as a non-blocking note (never silently green) alongside
+    # the derived entry-point note.
+    assert sorted(f.code for f in findings if f.severity is Severity.info) == [
+        "ENTRY_POINT_UNVERIFIED",
+        "FORMULA_VALIDATION_UNAVAILABLE",
     ]
     files = service.run_files(db_session, run.id)
     assert any(f.role is RunFileRole.validation_report for f in files)
